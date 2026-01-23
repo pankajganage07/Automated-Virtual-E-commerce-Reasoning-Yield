@@ -1,0 +1,23 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: ankane/pgvector:latest
+    container_name: ops_brain_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ops_brain
+      POSTGRES_USER: ops_user
+      POSTGRES_PASSWORD: ops_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ops_user -d ops_brain"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
