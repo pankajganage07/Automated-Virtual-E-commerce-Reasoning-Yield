@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from langgraph.tools import (
+from opsbrain_graph.tools import (
     CheckStockRequest,
     PredictStockOutRequest,
     InventoryToolset,

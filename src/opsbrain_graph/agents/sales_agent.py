@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from langgraph.tools import ExecuteSQLRequest
+from opsbrain_graph.tools import ExecuteSQLRequest
 from .base_agent import AgentRunContext, AgentTask, BaseAgent
 
 

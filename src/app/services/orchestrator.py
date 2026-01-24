@@ -1,40 +1,41 @@
-import datetime as dt
-from typing import TYPE_CHECKING
-
-from fastapi import HTTPException
+from typing import Sequence
 
 from config import Settings
+from opsbrain_graph.tools import ToolRegistry  # adjust if you renamed the local package
+from opsbrain_graph.graph import OperationsGraph
+from opsbrain_graph.state import PendingActionProposal
 from app.schemas.query import QueryRequest, QueryResponse
 from app.schemas.common import PendingAction
 from .hitl import PendingActionService
-
-if TYPE_CHECKING:
-    from uuid import UUID
+from app.services.memory import MemoryService
 
 
 class OrchestratorService:
     """
-    Thin facade that will later call into LangGraph. For now, responds with a placeholder.
+    Facade between FastAPI and the LangGraph workflow.
     """
 
     def __init__(self, settings: Settings, hitl_service: PendingActionService) -> None:
         self._settings = settings
-        self._hitl = hitl_service
+        self._hitl_service = hitl_service
+        self._tools = ToolRegistry.from_settings(settings)
+        self._memory_service = MemoryService(settings)
+        self._graph = OperationsGraph(settings, self._tools)
 
     async def run_query(self, payload: QueryRequest) -> QueryResponse:
-        # Placeholder example diagnostics
-        diagnostics = [
-            f"Environment: {self._settings.environment}",
-            "LangGraph orchestrator not yet implemented.",
-        ]
+        supervisor_output = await self._graph.run(
+            user_query=payload.question,
+            conversation_history=payload.metadata.get("history") if payload.metadata else None,
+            metadata=payload.metadata,
+        )
 
-        pending_actions = await self._hitl.list_pending()
+        if supervisor_output.pending_actions:
+            await self._hitl_service.create_from_proposals(supervisor_output.pending_actions)
+
+        pending_actions = await self._hitl_service.list_pending()
 
         return QueryResponse(
-            answer=(
-                "Thanks for your question! The agentic workflow is not wired yet, "
-                "but your query was accepted."
-            ),
-            diagnostics=diagnostics,
+            answer=supervisor_output.answer,
+            diagnostics=supervisor_output.diagnostics,
             pending_actions=pending_actions,
         )

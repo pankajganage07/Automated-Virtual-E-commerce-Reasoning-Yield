@@ -1,5 +1,4 @@
 from typing import Literal
-from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -16,6 +15,6 @@ class ApproveActionRequest(BaseModel):
 
 
 class ApproveActionResponse(BaseModel):
-    action_id: UUID
+    action_id: int
     status: Literal["approved", "rejected"]
     message: str

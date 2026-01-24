@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     database_url: PostgresDsn | None = Field(default=None, alias="DATABASE_URL")
     vector_database_url: PostgresDsn | None = Field(default=None, alias="VECTOR_DATABASE_URL")
 
+    embedding_model: str = Field(
+        default="text-embedding-3-small",
+        alias="OPENAI_EMBEDDING_MODEL",
+    )
+
     @property
     def database_url_str(self) -> str | None:
         """Return database URL as string for SQLAlchemy."""
@@ -30,6 +35,14 @@ class Settings(BaseSettings):
         if self.database_url is None:
             return None
         return str(self.database_url).replace("+asyncpg", "+psycopg")
+
+        # DIAL / Azure OpenAI
+
+    dial_api_key: str | None = Field(default=None, alias="DIAL_API_KEY")
+    dial_endpoint: AnyHttpUrl | None = Field(default=None, alias="DIAL_ENDPOINT")
+    dial_deployment: str | None = Field(default=None, alias="DIAL_DEPLOYMENT")
+    dial_api_version: str = Field(default="2023-12-01-preview", alias="DIAL_API_VERSION")
+    dial_temperature: float = Field(default=0.2, alias="DIAL_TEMPERATURE")
 
     # API Keys
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")

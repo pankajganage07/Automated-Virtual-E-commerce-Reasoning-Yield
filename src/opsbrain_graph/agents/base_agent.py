@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Sequence
 
 from config import Settings
-from langgraph.tools import ToolRegistry
+from opsbrain_graph.tools import ToolRegistry
 
 
 AgentStatus = Literal["success", "failure", "needs_retry"]
