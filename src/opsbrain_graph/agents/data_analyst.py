@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from langgraph.tools import ExecuteSQLRequest
+from opsbrain_graph.tools import ExecuteSQLRequest
 from .base_agent import AgentRunContext, AgentTask, BaseAgent
 
 

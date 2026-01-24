@@ -23,7 +23,7 @@ class MCPClient:
         api_key: str | None = None,
         timeout: float = 15.0,
     ) -> None:
-        self.base_url = base_url.rstrip("/")
+        self.base_url = str(base_url).rstrip("/")
         self.api_key = api_key
         self._client = httpx.AsyncClient(base_url=self.base_url, timeout=timeout)
 

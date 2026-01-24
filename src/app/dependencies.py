@@ -3,8 +3,8 @@ from functools import lru_cache
 from fastapi import Depends
 
 from config import Settings, get_settings
-from .services.hitl import PendingActionService
-from .services.orchestrator import OrchestratorService
+from app.services.hitl import PendingActionService
+from app.services.orchestrator import OrchestratorService
 
 
 def provide_settings() -> Settings:
@@ -13,7 +13,6 @@ def provide_settings() -> Settings:
 
 @lru_cache
 def _get_pending_action_service_cached(env: str) -> PendingActionService:
-    # pull settings inside the cached function to avoid unhashable args
     settings = get_settings()
     return PendingActionService(settings=settings)
 

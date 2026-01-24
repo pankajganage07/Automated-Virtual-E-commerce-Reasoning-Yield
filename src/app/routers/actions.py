@@ -1,6 +1,5 @@
-from uuid import UUID
-
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import NoResultFound
 
 from app.schemas.actions import (
     ApproveActionRequest,
@@ -10,16 +9,15 @@ from app.schemas.actions import (
 from app.services.hitl import PendingActionService
 from app.dependencies import provide_hitl_service
 
-router = APIRouter(prefix="/actions", tags=["Actions"])
+router = APIRouter(prefix="/actions", tags=["HITL Actions"])
 
 
-@router.get(
-    "/pending", response_model=PendingActionsResponse, status_code=status.HTTP_200_OK
-)
+@router.get("/pending", response_model=PendingActionsResponse, status_code=status.HTTP_200_OK)
 async def list_pending_actions(
     service: PendingActionService = Depends(provide_hitl_service),
 ) -> PendingActionsResponse:
-    return PendingActionsResponse(items=await service.list_pending())
+    entries = await service.list_pending()
+    return PendingActionsResponse(items=entries)
 
 
 @router.post(
@@ -28,9 +26,11 @@ async def list_pending_actions(
     status_code=status.HTTP_200_OK,
 )
 async def approve_action(
-    action_id: UUID,
+    action_id: int,
     payload: ApproveActionRequest,
     service: PendingActionService = Depends(provide_hitl_service),
 ) -> ApproveActionResponse:
-    result = await service.update_status(action_id, payload.status, payload.comment)
-    return result
+    try:
+        return await service.update_status(action_id, payload.status, payload.comment)
+    except NoResultFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

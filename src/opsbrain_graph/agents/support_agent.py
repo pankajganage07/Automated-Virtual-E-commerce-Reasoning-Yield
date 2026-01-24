@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from langgraph.tools import AnalyzeSentimentRequest
+from opsbrain_graph.tools import AnalyzeSentimentRequest
 from .base_agent import AgentRunContext, AgentTask, BaseAgent
 
 

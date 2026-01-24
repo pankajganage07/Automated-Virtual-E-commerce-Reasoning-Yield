@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from langgraph.tools import GetAdSpendRequest
+from opsbrain_graph.tools import GetAdSpendRequest
 from .base_agent import AgentRecommendation, AgentRunContext, AgentTask, BaseAgent
 
 
