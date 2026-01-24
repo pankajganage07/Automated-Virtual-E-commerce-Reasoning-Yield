@@ -3,11 +3,13 @@ from __future__ import annotations
 import abc
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Literal, Sequence
+from typing import Any, Literal, Sequence, TYPE_CHECKING
 
 from config import Settings
 from opsbrain_graph.tools import ToolRegistry
 
+if TYPE_CHECKING:
+    from opsbrain_graph.memory import MemoryService
 
 AgentStatus = Literal["success", "failure", "needs_retry"]
 
@@ -50,9 +52,12 @@ class BaseAgent(abc.ABC):
     name: str = "base"
     description: str = "Base agent"
 
-    def __init__(self, tools: ToolRegistry, settings: Settings) -> None:
+    def __init__(
+        self, tools: ToolRegistry, settings: Settings, memory_service: "MemoryService | None" = None
+    ) -> None:
         self.tools = tools
         self.settings = settings
+        self.memory_service = memory_service
         self.logger = logging.getLogger(f"agent.{self.name}")
 
     @abc.abstractmethod

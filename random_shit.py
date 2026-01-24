@@ -43,12 +43,11 @@ class MemoryService:
         embedding = await self._embedder.embed(query)
 
         async with async_session_factory() as session:
+            # Use .l2_distance() method instead of L2Distance function
             stmt = (
                 select(
                     AgentMemory,
-                    AgentMemory.embedding.l2_distance(AgentMemory.embedding, embedding).label(
-                        "distance"
-                    ),
+                    AgentMemory.embedding.l2_distance(embedding).label("distance"),
                 )
                 .order_by("distance")
                 .limit(k)

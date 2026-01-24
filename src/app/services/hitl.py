@@ -9,7 +9,7 @@ from sqlalchemy.exc import NoResultFound
 from config import Settings
 from db.models import PendingAction as PendingActionModel, PendingActionStatus
 from db.session import async_session_factory
-from langgraph.state import PendingActionProposal
+from opsbrain_graph.state import PendingActionProposal
 from app.schemas.common import PendingAction as PendingActionSchema
 from app.schemas.actions import ApproveActionResponse
 
