@@ -1,8 +1,12 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from pydantic import AnyHttpUrl, Field, PostgresDsn
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Find the project root (where .env lives)
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 class Settings(BaseSettings):
@@ -56,7 +60,11 @@ class Settings(BaseSettings):
     # mcp_support_endpoint: AnyHttpUrl | None = Field(default=None, alias="MCP_SUPPORT_ENDPOINT")
     # mcp_memory_endpoint: AnyHttpUrl | None = Field(default=None, alias="MCP_MEMORY_ENDPOINT")
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=str(_PROJECT_ROOT / ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     def as_log_context(self) -> dict[str, Any]:
         """

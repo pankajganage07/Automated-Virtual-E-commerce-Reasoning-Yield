@@ -37,6 +37,7 @@ class AgentRunContext:
     conversation_history: Sequence[dict[str, Any]] = field(default_factory=list)
     memory_context: Sequence[dict[str, Any]] = field(default_factory=list)
     state_snapshot: dict[str, Any] | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

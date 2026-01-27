@@ -1,11 +1,7 @@
-from typing import Sequence
-
 from config import Settings
-from opsbrain_graph.tools import ToolRegistry  # adjust if you renamed the local package
+from opsbrain_graph.tools import ToolRegistry
 from opsbrain_graph.graph import OperationsGraph
-from opsbrain_graph.state import PendingActionProposal
 from app.schemas.query import QueryRequest, QueryResponse
-from app.schemas.common import PendingAction
 from .hitl import PendingActionService
 from app.services.memory import MemoryService
 
@@ -24,7 +20,7 @@ class OrchestratorService:
 
     async def run_query(self, payload: QueryRequest) -> QueryResponse:
         supervisor_output = await self._graph.run(
-            user_query=payload.question,
+            query=payload.question,
             conversation_history=payload.metadata.get("history") if payload.metadata else None,
             metadata=payload.metadata,
         )

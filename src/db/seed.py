@@ -14,6 +14,7 @@ async def seed() -> None:
     async with async_session_factory() as session:
         await _clear_tables(session)
         await _seed_products(session)
+        await session.commit()  # Commit products first - FK constraints require them in DB
         await _seed_orders(session)
         await _seed_campaigns(session)
         await _seed_support_tickets(session)
@@ -55,11 +56,64 @@ async def _seed_products(session: AsyncSession) -> None:
 
 
 async def _seed_orders(session: AsyncSession) -> None:
+    now = dt.datetime.now(dt.timezone.utc)
     orders = [
-        Order(product_id=1, qty=10, revenue=Decimal("249.90"), region="US", channel="Shopify"),
-        Order(product_id=1, qty=4, revenue=Decimal("99.96"), region="EU", channel="Amazon"),
-        Order(product_id=2, qty=20, revenue=Decimal("299.80"), region="US", channel="Amazon"),
-        Order(product_id=3, qty=5, revenue=Decimal("249.95"), region="US", channel="Shopify"),
+        Order(
+            product_id=1,
+            qty=10,
+            revenue=Decimal("249.90"),
+            region="US",
+            channel="Shopify",
+            timestamp=now - dt.timedelta(days=1),
+        ),
+        Order(
+            product_id=1,
+            qty=4,
+            revenue=Decimal("99.96"),
+            region="EU",
+            channel="Amazon",
+            timestamp=now - dt.timedelta(days=2),
+        ),
+        Order(
+            product_id=2,
+            qty=20,
+            revenue=Decimal("299.80"),
+            region="US",
+            channel="Amazon",
+            timestamp=now - dt.timedelta(days=1),
+        ),
+        Order(
+            product_id=3,
+            qty=5,
+            revenue=Decimal("249.95"),
+            region="US",
+            channel="Shopify",
+            timestamp=now - dt.timedelta(days=3),
+        ),
+        Order(
+            product_id=1,
+            qty=8,
+            revenue=Decimal("199.92"),
+            region="US",
+            channel="Shopify",
+            timestamp=now - dt.timedelta(days=4),
+        ),
+        Order(
+            product_id=2,
+            qty=15,
+            revenue=Decimal("224.85"),
+            region="EU",
+            channel="Amazon",
+            timestamp=now - dt.timedelta(days=5),
+        ),
+        Order(
+            product_id=3,
+            qty=3,
+            revenue=Decimal("149.97"),
+            region="US",
+            channel="Shopify",
+            timestamp=now - dt.timedelta(days=6),
+        ),
     ]
     session.add_all(orders)
 

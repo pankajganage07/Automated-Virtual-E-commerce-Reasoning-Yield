@@ -41,7 +41,11 @@ class MCPClient:
             raise ToolInvocationError(tool_name, response.status_code, response.text)
 
         try:
-            return response.json()
+            data = response.json()
+            # Extract 'result' from the MCP response envelope
+            if isinstance(data, dict) and "result" in data:
+                return data["result"]
+            return data
         except json.JSONDecodeError as exc:
             raise MCPError(f"Invalid JSON response from MCP tool {tool_name}: {exc}") from exc
 

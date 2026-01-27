@@ -66,7 +66,7 @@ class GetTopProductsTool(BaseTool):
         return TopProductsPayload
 
     async def run(self, session, payload: TopProductsPayload) -> dict[str, Any]:
-        statement = """
+        statement = f"""
             SELECT
                 p.id,
                 p.name,
@@ -74,14 +74,14 @@ class GetTopProductsTool(BaseTool):
                 SUM(o.revenue) AS revenue
             FROM products p
             JOIN orders o ON o.product_id = p.id
-            WHERE o.timestamp >= NOW() - INTERVAL :window_days || ' days'
+            WHERE o.timestamp >= NOW() - INTERVAL '{payload.window_days} days'
             GROUP BY p.id, p.name
             ORDER BY revenue DESC
             LIMIT :limit
         """
         result = await session.execute(
             text(statement),
-            {"window_days": payload.window_days, "limit": payload.limit},
+            {"limit": payload.limit},
         )
         rows = [
             {
