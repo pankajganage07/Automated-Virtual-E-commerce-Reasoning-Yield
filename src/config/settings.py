@@ -7,6 +7,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Find the project root (where .env lives)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+print("#" * 10)
+print(f"Project root resolved to: {_PROJECT_ROOT}")
+print("#" * 10)
 
 
 class Settings(BaseSettings):
@@ -51,14 +54,17 @@ class Settings(BaseSettings):
     # API Keys
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     langsmith_api_key: str | None = Field(default=None, alias="LANGSMITH_API_KEY")
+    langsmith_project: str = Field(default="opsbrain-graph", alias="LANGSMITH_PROJECT")
+    langsmith_endpoint: str = Field(
+        default="https://api.smith.langchain.com",
+        alias="LANGSMITH_ENDPOINT",
+    )
+    langsmith_tracing_enabled: bool = Field(default=True, alias="LANGSMITH_TRACING_ENABLED")
 
     # MCP Endpoints
+    mcp_server_port: int = Field(default=9001, alias="MCP_SERVER_PORT")
     mcp_sql_endpoint: AnyHttpUrl | None = Field(default=None, alias="MCP_SQL_ENDPOINT")
     mcp_api_key: str | None = Field(default=None, alias="MCP_API_KEY")
-    # mcp_inventory_endpoint: AnyHttpUrl | None = Field(default=None, alias="MCP_INVENTORY_ENDPOINT")
-    # mcp_marketing_endpoint: AnyHttpUrl | None = Field(default=None, alias="MCP_MARKETING_ENDPOINT")
-    # mcp_support_endpoint: AnyHttpUrl | None = Field(default=None, alias="MCP_SUPPORT_ENDPOINT")
-    # mcp_memory_endpoint: AnyHttpUrl | None = Field(default=None, alias="MCP_MEMORY_ENDPOINT")
 
     model_config = SettingsConfigDict(
         env_file=str(_PROJECT_ROOT / ".env"),

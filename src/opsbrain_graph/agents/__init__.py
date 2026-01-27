@@ -1,4 +1,6 @@
 from .base_agent import (
+    AgentCapability,
+    AgentMetadata,
     AgentRecommendation,
     AgentResult,
     AgentRunContext,
@@ -13,6 +15,8 @@ from .data_analyst import DataAnalystAgent
 from .historian_agent import HistorianAgent
 
 __all__ = [
+    "AgentCapability",
+    "AgentMetadata",
     "BaseAgent",
     "AgentTask",
     "AgentRunContext",

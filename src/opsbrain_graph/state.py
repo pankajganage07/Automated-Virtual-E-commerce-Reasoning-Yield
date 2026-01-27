@@ -38,6 +38,19 @@ class GraphState(TypedDict, total=False):
     system_warnings: list[str]
     metadata: dict[str, Any]
 
+    # Re-planning control fields
+    replan_count: int  # Number of times we've re-planned (starts at 0)
+    max_replans: int  # Maximum allowed re-plans (default: 2)
+    needs_replan: bool  # Flag set by evaluation node
+    replan_reason: str | None  # Why re-planning was triggered
+
+    # HITL checkpointing fields
+    thread_id: str | None  # Unique ID for this conversation/session
+    hitl_pending_ids: list[int]  # IDs of pending actions awaiting approval
+    hitl_approved_ids: list[int]  # IDs of actions that were approved
+    hitl_rejected_ids: list[int]  # IDs of actions that were rejected
+    hitl_resumed: bool  # Whether this is a resumed execution
+
     # Internal fields for final output
     _final_answer: str
     _diagnostics: list[str]

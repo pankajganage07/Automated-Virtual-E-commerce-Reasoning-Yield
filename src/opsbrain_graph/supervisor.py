@@ -3,16 +3,190 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any, Sequence, TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import BaseModel, Field
 
 from config import Settings
-from opsbrain_graph.agents import AgentResult, AgentTask, AgentRecommendation
+from opsbrain_graph.agents import AgentResult, AgentTask, AgentRecommendation, AgentMetadata
 from opsbrain_graph.state import GraphState, DiagnosisSummary, PendingActionProposal
 from utils.llm import get_llm
 
+if TYPE_CHECKING:
+    from opsbrain_graph.agents import BaseAgent
+
 logger = logging.getLogger("supervisor")
+
+
+# =============================================================================
+# Dynamic Planning Prompt Generator
+# =============================================================================
+
+
+def generate_planning_prompt(agent_metadata: dict[str, AgentMetadata]) -> str:
+    """
+    Generate the planning system prompt dynamically from agent metadata.
+
+    This allows the prompt to stay in sync with actual agent capabilities.
+    """
+    lines = [
+        "You are an AI Operations Supervisor for an e-commerce business.",
+        "Your job is to analyze the user's question and create a task plan by assigning work to specialist agents.",
+        "",
+        "## Available Agents and Their Capabilities:",
+        "",
+    ]
+
+    # Add each agent's metadata
+    for idx, (name, meta) in enumerate(sorted(agent_metadata.items()), 1):
+        lines.append(f"### {idx}. {meta.display_name} Agent")
+        lines.append(f"- {meta.description}")
+
+        if meta.capabilities:
+            lines.append("- Capabilities:")
+            for cap in meta.capabilities:
+                params_desc = ""
+                if cap.parameters:
+                    params_list = [f"{k}: {v}" for k, v in cap.parameters.items()]
+                    params_desc = f" (parameters: {'; '.join(params_list)})"
+                lines.append(f"  * {cap.name}: {cap.description}{params_desc}")
+
+        if meta.keywords:
+            lines.append(f"- Trigger keywords: {', '.join(meta.keywords[:5])}")
+
+        lines.append("")
+
+    # Add task assignment rules
+    lines.extend(
+        [
+            "## Task Assignment Rules:",
+            "1. Assign the MINIMUM number of agents needed to answer the question",
+            "2. Multiple agents can work in PARALLEL if their tasks are independent",
+            "3. For 'why' questions, include the HISTORIAN agent",
+            "4. For product-related issues, consider both SALES and INVENTORY",
+            "5. Be specific with parameters - extract numbers, time windows, and filters from the query",
+            "6. Use agent keywords to help identify which agents are relevant",
+            "7. CRITICAL: Always specify the 'mode' parameter when an agent has multiple modes",
+            "   - For questions about 'top products', 'best sellers', use mode='top_products'",
+            "   - For questions about 'trends', 'performance', 'revenue over time', use mode='trends'",
+            "",
+            "## Output Format:",
+            "Return a JSON array of tasks. Each task must have:",
+            "- agent: One of " + ", ".join(f'"{name}"' for name in sorted(agent_metadata.keys())),
+            "- objective: Clear description of what the agent should accomplish",
+            "- parameters: Dict with mode, window_days, limit, product_ids, etc. ALWAYS include 'mode' for sales agent",
+            "- priority: 1 (highest) to 5 (lowest) - for execution ordering",
+            "",
+            "Example for 'top products' question:",
+            "[",
+            '  {"agent": "sales", "objective": "Find top selling products", "parameters": {"mode": "top_products", "window_days": 7, "limit": 5}, "priority": 1}',
+            "]",
+            "",
+            "Example for 'sales trends' question:",
+            "[",
+            '  {"agent": "sales", "objective": "Analyze revenue trends", "parameters": {"mode": "trends", "window_days": 7}, "priority": 1}',
+            "]",
+            "",
+            "IMPORTANT: Return ONLY the JSON array, no additional text or markdown.",
+        ]
+    )
+
+    return "\n".join(lines)
+
+
+# =============================================================================
+# Fallback static prompt (used if no agents registered)
+# =============================================================================
+
+PLANNING_SYSTEM_PROMPT = """You are an AI Operations Supervisor for an e-commerce business.
+Your job is to analyze the user's question and create a task plan by assigning work to specialist agents.
+
+## Available Agents and Their Capabilities:
+
+### 1. SALES Agent
+- Analyzes revenue trends, sales performance, and detects anomalies
+- Can identify top-selling products
+- Capabilities:
+  * mode: "trends" - Analyze revenue trends over time (parameters: window_days, group_by)
+  * mode: "top_products" - Find best-selling products (parameters: window_days, limit)
+
+### 2. INVENTORY Agent
+- Monitors stock levels and identifies low-stock items
+- Capabilities:
+  * Check stock levels for specific products (parameters: product_ids)
+  * Detect items below low_stock_threshold
+
+### 3. MARKETING Agent
+- Evaluates campaign performance, ad spend, ROI
+- Capabilities:
+  * Analyze campaign spend efficiency (parameters: window_days)
+  * Track clicks, conversions, ROAS
+
+### 4. SUPPORT Agent
+- Analyzes customer support tickets and sentiment
+- Capabilities:
+  * Summarize support sentiment (parameters: window_days, product_id)
+  * Detect issue spikes and negative sentiment trends
+
+### 5. HISTORIAN Agent
+- Retrieves similar past incidents from memory for context
+- Use when user asks "why", wants explanations, or needs historical context
+- Capabilities:
+  * mode: "query" - Search past incidents (parameters: query)
+
+### 6. DATA_ANALYST Agent
+- Performs custom SQL queries for complex analysis
+- Use for questions that don't fit other agents
+- Capabilities:
+  * Execute analytical queries (parameters: query_type, filters)
+
+## Task Assignment Rules:
+1. Assign the MINIMUM number of agents needed to answer the question
+2. Multiple agents can work in PARALLEL if their tasks are independent
+3. For "why" questions, include the HISTORIAN agent
+4. For product-related issues, consider both SALES and INVENTORY
+5. Be specific with parameters - extract numbers, time windows, and filters from the query
+
+## Output Format:
+Return a JSON array of tasks. Each task must have:
+- agent: One of "sales", "inventory", "marketing", "support", "historian", "data_analyst"
+- objective: Clear description of what the agent should accomplish
+- parameters: Dict with mode, window_days, limit, product_ids, etc. as needed
+- priority: 1 (highest) to 5 (lowest) - for execution ordering
+
+Example:
+[
+  {"agent": "sales", "objective": "Find top 5 selling products", "parameters": {"mode": "top_products", "window_days": 7, "limit": 5}, "priority": 1},
+  {"agent": "inventory", "objective": "Check stock for top sellers", "parameters": {"product_ids": []}, "priority": 2}
+]
+
+IMPORTANT: Return ONLY the JSON array, no additional text or markdown."""
+
+
+# =============================================================================
+# Pydantic models for structured plan output
+# =============================================================================
+
+
+class PlannedTask(BaseModel):
+    """A single task in the battle plan."""
+
+    agent: str = Field(
+        ..., description="Agent name: sales, inventory, marketing, support, historian, data_analyst"
+    )
+    objective: str = Field(..., description="What the agent should accomplish")
+    parameters: dict[str, Any] = Field(
+        default_factory=dict, description="Agent-specific parameters"
+    )
+    priority: int = Field(default=1, ge=1, le=5, description="Execution priority (1=highest)")
+
+
+class TaskPlan(BaseModel):
+    """The complete task plan from the LLM."""
+
+    tasks: list[PlannedTask] = Field(default_factory=list)
+    reasoning: str = Field(default="", description="Brief explanation of the plan")
 
 
 SYNTHESIS_SYSTEM_PROMPT = """You are an AI Operations Analyst for an e-commerce business. 
@@ -42,9 +216,34 @@ class Supervisor:
     Responsible for high-level planning (battle plan) and synthesis of agent outputs.
     """
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        agent_metadata: dict[str, AgentMetadata] | None = None,
+    ) -> None:
         self.settings = settings
         self._llm = None
+        self._agent_metadata = agent_metadata or {}
+        self._planning_prompt: str | None = None
+
+    def register_agents(self, agents: dict[str, "BaseAgent"]) -> None:
+        """Register agents and build planning prompt from their metadata."""
+        self._agent_metadata = {name: agent.get_metadata() for name, agent in agents.items()}
+        self._planning_prompt = None  # Force regeneration
+
+    @property
+    def planning_prompt(self) -> str:
+        """Get the planning prompt, generating from metadata if available."""
+        if self._planning_prompt is None:
+            if self._agent_metadata:
+                self._planning_prompt = generate_planning_prompt(self._agent_metadata)
+                logger.info(
+                    "Generated dynamic planning prompt from %d agents", len(self._agent_metadata)
+                )
+            else:
+                self._planning_prompt = PLANNING_SYSTEM_PROMPT
+                logger.info("Using static fallback planning prompt")
+        return self._planning_prompt
 
     @property
     def llm(self):
@@ -70,9 +269,143 @@ class Supervisor:
             hitl_wait=False,
             system_warnings=[],
             metadata={},
+            # Re-planning control
+            replan_count=0,
+            max_replans=2,
+            needs_replan=False,
+            replan_reason=None,
         )
 
-    def plan(self, state: GraphState) -> list[AgentTask]:
+    async def plan(self, state: GraphState) -> list[AgentTask]:
+        """
+        Use LLM to analyze the user query and create a task plan.
+
+        Returns a list of AgentTask objects to be executed.
+        """
+        query = state["user_query"]
+
+        try:
+            tasks = await self._llm_plan(query, state)
+            if tasks:
+                state["battle_plan"] = tasks
+                return tasks
+        except Exception as exc:
+            logger.warning("LLM planning failed, falling back to keyword matching: %s", exc)
+
+        # Fallback to keyword-based planning if LLM fails
+        tasks = self._keyword_plan(state)
+        state["battle_plan"] = tasks
+        return tasks
+
+    async def _llm_plan(self, query: str, state: GraphState) -> list[AgentTask]:
+        """Use LLM to generate the task plan."""
+
+        # Build context with any additional info
+        context_parts = [f"User Question: {query}"]
+
+        if state.get("conversation_history"):
+            context_parts.append("\nRecent conversation context:")
+            for msg in state["conversation_history"][-3:]:  # Last 3 messages
+                role = msg.get("role", "user")
+                content = msg.get("content", "")[:200]
+                context_parts.append(f"  {role}: {content}")
+
+        if state.get("metadata"):
+            context_parts.append(f"\nMetadata: {json.dumps(state['metadata'])}")
+
+        user_content = "\n".join(context_parts)
+
+        messages = [
+            SystemMessage(content=self.planning_prompt),  # Use dynamic prompt
+            HumanMessage(content=user_content),
+        ]
+
+        response = await self.llm.ainvoke(messages)
+        raw_plan = response.content.strip()
+
+        # Parse the JSON response
+        tasks = self._parse_plan_response(raw_plan, state)
+
+        if tasks:
+            logger.info(
+                "LLM planned %d tasks: %s",
+                len(tasks),
+                [(t.agent, t.parameters) for t in tasks],
+            )
+
+        return tasks
+
+    def _parse_plan_response(self, raw_response: str, state: GraphState) -> list[AgentTask]:
+        """Parse the LLM's JSON response into AgentTask objects."""
+
+        # Clean up response - remove markdown code blocks if present
+        cleaned = raw_response.strip()
+        if cleaned.startswith("```"):
+            # Remove markdown code block
+            lines = cleaned.split("\n")
+            # Find the start and end of code block
+            start_idx = 1 if lines[0].startswith("```") else 0
+            end_idx = len(lines)
+            for i in range(len(lines) - 1, -1, -1):
+                if lines[i].strip() == "```":
+                    end_idx = i
+                    break
+            cleaned = "\n".join(lines[start_idx:end_idx])
+
+        try:
+            parsed = json.loads(cleaned)
+        except json.JSONDecodeError as exc:
+            logger.warning("Failed to parse LLM plan as JSON: %s", exc)
+            return []
+
+        # Handle both array and object formats
+        if isinstance(parsed, dict):
+            if "tasks" in parsed:
+                parsed = parsed["tasks"]
+            else:
+                parsed = [parsed]
+
+        if not isinstance(parsed, list):
+            logger.warning("LLM plan is not a list: %s", type(parsed))
+            return []
+
+        # Valid agent names
+        valid_agents = {"sales", "inventory", "marketing", "support", "historian", "data_analyst"}
+
+        tasks: list[AgentTask] = []
+        for idx, item in enumerate(parsed):
+            if not isinstance(item, dict):
+                continue
+
+            agent = item.get("agent", "").lower().replace(" ", "_")
+            if agent not in valid_agents:
+                logger.warning("Invalid agent in plan: %s", agent)
+                continue
+
+            objective = item.get("objective", f"Execute {agent} task")
+            parameters = item.get("parameters", {})
+            priority = item.get("priority", idx + 1)
+
+            # Determine result slot based on agent
+            if agent == "historian":
+                result_slot = "memory_context"
+            else:
+                result_slot = f"agent_findings.{agent}"
+
+            task = AgentTask(
+                agent=agent,
+                objective=objective,
+                parameters=parameters,
+                result_slot=result_slot,
+            )
+            tasks.append((priority, task))
+
+        # Sort by priority and extract tasks
+        tasks.sort(key=lambda x: x[0])
+        return [t for _, t in tasks]
+
+    def _keyword_plan(self, state: GraphState) -> list[AgentTask]:
+        """Fallback keyword-based planning when LLM is unavailable."""
         query = state["user_query"].lower()
         tasks: list[AgentTask] = []
 
@@ -80,7 +413,6 @@ class Supervisor:
         if any(kw in query for kw in ("top", "best", "highest", "most sold", "best selling")):
             if any(kw in query for kw in ("product", "item", "sku", "selling")):
                 limit = 5  # default
-                # Try to extract number from query
                 import re
 
                 match = re.search(r"top\s*(\d+)", query)
@@ -157,7 +489,7 @@ class Supervisor:
                 )
             )
 
-        # Default: if no specific agent matched, use sales + support as general check
+        # Default: if no specific agent matched, use sales as general check
         if not tasks:
             tasks.append(
                 AgentTask(
@@ -168,7 +500,6 @@ class Supervisor:
                 )
             )
 
-        state["battle_plan"] = tasks
         return tasks
 
     def incorporate_agent_result(
@@ -196,6 +527,164 @@ class Supervisor:
             if "system_warnings" not in state:
                 state["system_warnings"] = []
             state["system_warnings"].append(f"{agent_name} agent failed: {result.errors}")
+
+    def evaluate_results(self, state: GraphState) -> bool:
+        """
+        Evaluate agent results to determine if re-planning is needed.
+
+        Returns True if results are sufficient, False if re-planning needed.
+        """
+        replan_count = state.get("replan_count", 0)
+        max_replans = state.get("max_replans", 2)
+
+        # Don't exceed max replans
+        if replan_count >= max_replans:
+            logger.info("Max replans (%d) reached, proceeding to synthesis", max_replans)
+            state["needs_replan"] = False
+            return True
+
+        battle_plan = state.get("battle_plan", [])
+        agent_findings = state.get("agent_findings", {})
+        system_warnings = state.get("system_warnings", [])
+
+        # Check for failed agents that were critical
+        failed_agents = set()
+        for warning in system_warnings:
+            for task in battle_plan:
+                if task.agent in warning and "failed" in warning.lower():
+                    failed_agents.add(task.agent)
+
+        # Check if we got results from at least one agent
+        if not agent_findings:
+            state["needs_replan"] = True
+            state["replan_reason"] = "No agents returned findings"
+            logger.warning("Re-planning needed: no agent findings")
+            return False
+
+        # Check if critical agents failed (e.g., the first/highest priority task)
+        if battle_plan and battle_plan[0].agent in failed_agents:
+            state["needs_replan"] = True
+            state["replan_reason"] = f"Primary agent '{battle_plan[0].agent}' failed"
+            logger.warning("Re-planning needed: primary agent failed")
+            return False
+
+        # Check for empty findings (agent returned but with no useful data)
+        empty_findings = []
+        for agent_name, findings in agent_findings.items():
+            if self._is_empty_result(findings):
+                empty_findings.append(agent_name)
+
+        # If all agents returned empty, try re-planning
+        if empty_findings and len(empty_findings) == len(agent_findings):
+            state["needs_replan"] = True
+            state["replan_reason"] = f"All agents returned empty results: {empty_findings}"
+            logger.warning("Re-planning needed: all agents returned empty results")
+            return False
+
+        # Results are sufficient
+        state["needs_replan"] = False
+        state["replan_reason"] = None
+        return True
+
+    def _is_empty_result(self, findings: dict[str, Any]) -> bool:
+        """Check if findings are effectively empty."""
+        if not findings:
+            return True
+
+        # Check common patterns for empty results
+        for key, value in findings.items():
+            if isinstance(value, list) and len(value) > 0:
+                return False
+            if isinstance(value, dict) and len(value) > 0:
+                return False
+            if isinstance(value, (int, float)) and value != 0:
+                return False
+            if isinstance(value, str) and value.strip():
+                return False
+
+        return True
+
+    async def replan(self, state: GraphState) -> list[AgentTask]:
+        """
+        Create a new plan based on what failed or returned empty.
+
+        This considers the previous failures and tries alternative approaches.
+        """
+        replan_count = state.get("replan_count", 0)
+        state["replan_count"] = replan_count + 1
+
+        replan_reason = state.get("replan_reason", "Unknown reason")
+        failed_agents = set()
+
+        # Identify failed agents from warnings
+        for warning in state.get("system_warnings", []):
+            for agent_name in self._agent_metadata.keys():
+                if agent_name in warning.lower():
+                    failed_agents.add(agent_name)
+
+        # Build context for LLM re-planning
+        context_parts = [
+            f"User Question: {state['user_query']}",
+            f"\nRe-planning attempt #{state['replan_count']} due to: {replan_reason}",
+        ]
+
+        if failed_agents:
+            context_parts.append(
+                f"Failed agents to avoid or retry differently: {list(failed_agents)}"
+            )
+
+        previous_findings = state.get("agent_findings", {})
+        if previous_findings:
+            context_parts.append(
+                f"\nPartial results already collected from: {list(previous_findings.keys())}"
+            )
+            context_parts.append("Consider if additional agents could help complete the answer.")
+
+        user_content = "\n".join(context_parts)
+
+        try:
+            messages = [
+                SystemMessage(content=self.planning_prompt),
+                HumanMessage(content=user_content),
+            ]
+
+            response = await self.llm.ainvoke(messages)
+            raw_plan = response.content.strip()
+
+            tasks = self._parse_plan_response(raw_plan, state)
+
+            # Filter out agents we already have good results from
+            tasks = [
+                t for t in tasks if t.agent not in previous_findings or t.agent in failed_agents
+            ]
+
+            if tasks:
+                logger.info("Re-planned %d new tasks: %s", len(tasks), [t.agent for t in tasks])
+                state["battle_plan"] = tasks
+                return tasks
+
+        except Exception as exc:
+            logger.warning("LLM re-planning failed: %s", exc)
+
+        # Fallback: retry failed agents with different approach or use data_analyst
+        fallback_tasks = []
+        if failed_agents and "data_analyst" not in failed_agents:
+            fallback_tasks.append(
+                AgentTask(
+                    agent="data_analyst",
+                    objective=f"Analyze data to answer: {state['user_query']}",
+                    parameters={"statement": "SELECT 1", "params": None},  # Placeholder
+                    result_slot="agent_findings.data_analyst",
+                )
+            )
+
+        if fallback_tasks:
+            state["battle_plan"] = fallback_tasks
+            return fallback_tasks
+
+        # No fallback possible, proceed with what we have
+        state["needs_replan"] = False
+        return []
 
     async def synthesize(self, state: GraphState) -> SupervisorOutput:
         """Use LLM to synthesize agent findings into a coherent answer."""

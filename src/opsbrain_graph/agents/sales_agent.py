@@ -4,6 +4,8 @@ import logging
 from typing import Any
 
 from .base_agent import (
+    AgentCapability,
+    AgentMetadata,
     AgentRecommendation,
     AgentResult,
     AgentRunContext,
@@ -22,6 +24,53 @@ logger = logging.getLogger("agent.sales")
 class SalesAgent(BaseAgent):
     name = "sales"
     description = "Analyzes revenue, trends, top products, and anomalies."
+
+    metadata = AgentMetadata(
+        name="sales",
+        display_name="SALES",
+        description="Analyzes revenue trends, sales performance, and detects anomalies. Can identify top-selling products and revenue patterns.",
+        capabilities=[
+            AgentCapability(
+                name="trends",
+                description="Analyze revenue trends over time, detect drops or spikes",
+                parameters={
+                    "window_days": "Number of days to analyze (default: 7)",
+                    "group_by": "Grouping: 'day', 'week', or 'month' (default: 'day')",
+                },
+                example_queries=[
+                    "How are sales trending this week?",
+                    "Show me revenue trends for the last 30 days",
+                    "Why did sales drop yesterday?",
+                ],
+            ),
+            AgentCapability(
+                name="top_products",
+                description="Find best-selling products by revenue or quantity",
+                parameters={
+                    "window_days": "Time period to analyze (default: 7)",
+                    "limit": "Number of products to return (default: 5)",
+                },
+                example_queries=[
+                    "What are the top 5 selling products?",
+                    "Which products made the most money this month?",
+                    "Best sellers last week",
+                ],
+            ),
+        ],
+        keywords=[
+            "sale",
+            "revenue",
+            "drop",
+            "trend",
+            "income",
+            "earning",
+            "money",
+            "top",
+            "best",
+            "product",
+        ],
+        priority_boost=["revenue", "sales drop", "urgent"],
+    )
 
     async def run(self, task: AgentTask, context: AgentRunContext) -> AgentResult:
         params = task.parameters

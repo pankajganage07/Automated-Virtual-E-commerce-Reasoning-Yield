@@ -16,6 +16,7 @@ dependencies = [
     "langgraph>=0.0.52",
     "langchain>=0.1.17",
     "langchain-openai>=0.1.7",
+    "langsmith>=0.1.50",
     "openai>=1.23.6",
     "sqlalchemy>=2.0.29",
     "asyncpg>=0.29.0",
@@ -40,6 +41,12 @@ target-version = "py311"
 
 [tool.black]
 line-length = 100
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "src"
 
 [build-system]
 requires = ["setuptools>=68.0"]
