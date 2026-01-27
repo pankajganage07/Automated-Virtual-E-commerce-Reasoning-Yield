@@ -2,7 +2,7 @@ from fastapi import FastAPI
 
 from config import get_settings
 from config.logging import setup_logging
-from app.routers import actions, health, query
+from app.routers import actions, health, query, history
 
 settings = get_settings()
 setup_logging(level=settings.log_level)
@@ -17,6 +17,7 @@ app = FastAPI(
 app.include_router(health.router)
 app.include_router(actions.router)
 app.include_router(query.router)
+app.include_router(history.router)
 
 
 @app.get("/", tags=["Root"])

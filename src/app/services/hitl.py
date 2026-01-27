@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Iterable, Literal, Sequence
+from typing import Any, Iterable, Literal, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.exc import NoResultFound
@@ -11,7 +11,8 @@ from db.models import PendingAction as PendingActionModel, PendingActionStatus
 from db.session import async_session_factory
 from opsbrain_graph.state import PendingActionProposal
 from app.schemas.common import PendingAction as PendingActionSchema
-from app.schemas.actions import ApproveActionResponse
+from app.schemas.actions import ApproveActionResponse, ExecuteActionResponse
+from app.services.action_executor import ActionExecutor, ActionExecutionError
 
 
 class PendingActionService:
@@ -21,6 +22,7 @@ class PendingActionService:
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
+        self._executor = ActionExecutor(settings)
 
     async def list_pending(self) -> list[PendingActionSchema]:
         async with async_session_factory() as session:
@@ -86,6 +88,81 @@ class PendingActionService:
 
         message = comment or f"Action {status} at {now.isoformat()}."
         return ApproveActionResponse(action_id=action_id, status=status, message=message)
+
+    async def execute_action(
+        self,
+        action_id: int,
+    ) -> ExecuteActionResponse:
+        """
+        Execute an approved action by calling the corresponding MCP tool.
+
+        Only actions with status 'approved' can be executed.
+        After successful execution, status changes to 'executed'.
+        """
+        now = dt.datetime.utcnow()
+
+        async with async_session_factory() as session:
+            result = await session.execute(
+                select(PendingActionModel)
+                .where(PendingActionModel.id == action_id)
+                .with_for_update()
+            )
+            row = result.scalar_one_or_none()
+
+            if row is None:
+                raise NoResultFound(f"Pending action {action_id} not found")
+
+            if row.status != PendingActionStatus.APPROVED.value:
+                return ExecuteActionResponse(
+                    action_id=action_id,
+                    status=row.status,
+                    success=False,
+                    message=f"Cannot execute action with status '{row.status}'. Only 'approved' actions can be executed.",
+                    result=None,
+                )
+
+            # Execute the action via MCP
+            try:
+                exec_result = await self._executor.execute(
+                    action_type=row.action_type,
+                    payload=row.payload,
+                )
+
+                # Update status to executed
+                row.status = PendingActionStatus.EXECUTED.value
+                row.updated_at = now
+                await session.commit()
+
+                return ExecuteActionResponse(
+                    action_id=action_id,
+                    status=PendingActionStatus.EXECUTED.value,
+                    success=True,
+                    message=f"Action executed successfully at {now.isoformat()}.",
+                    result=exec_result,
+                )
+            except ActionExecutionError as exc:
+                return ExecuteActionResponse(
+                    action_id=action_id,
+                    status=row.status,
+                    success=False,
+                    message=str(exc),
+                    result={"error": exc.reason, "details": exc.details},
+                )
+
+    async def approve_and_execute(
+        self,
+        action_id: int,
+        comment: str | None = None,
+    ) -> ExecuteActionResponse:
+        """
+        Approve an action and immediately execute it.
+
+        This is a convenience method that combines approve + execute in one call.
+        """
+        # First approve
+        await self.update_status(action_id, "approved", comment)
+        # Then execute
+        return await self.execute_action(action_id)
 
     async def list_by_status(self, statuses: Iterable[str]) -> list[PendingActionSchema]:
         async with async_session_factory() as session:

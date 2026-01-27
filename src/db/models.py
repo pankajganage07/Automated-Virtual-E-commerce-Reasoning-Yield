@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from enum import Enum as PyEnum
 from typing import Optional
 
 from pgvector.sqlalchemy import Vector
@@ -105,7 +106,7 @@ class AgentMemory(Base):
     )
 
 
-class PendingActionStatus(str, Enum):
+class PendingActionStatus(str, PyEnum):
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"

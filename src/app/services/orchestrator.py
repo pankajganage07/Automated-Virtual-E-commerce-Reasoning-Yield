@@ -1,11 +1,7 @@
-from typing import Sequence
-
 from config import Settings
-from opsbrain_graph.tools import ToolRegistry  # adjust if you renamed the local package
+from opsbrain_graph.tools import ToolRegistry
 from opsbrain_graph.graph import OperationsGraph
-from opsbrain_graph.state import PendingActionProposal
 from app.schemas.query import QueryRequest, QueryResponse
-from app.schemas.common import PendingAction
 from .hitl import PendingActionService
 from app.services.memory import MemoryService
 
@@ -23,10 +19,11 @@ class OrchestratorService:
         self._graph = OperationsGraph(settings, self._tools)
 
     async def run_query(self, payload: QueryRequest) -> QueryResponse:
-        supervisor_output = await self._graph.run(
-            user_query=payload.question,
+        supervisor_output, thread_id, hitl_waiting = await self._graph.run(
+            query=payload.question,
             conversation_history=payload.metadata.get("history") if payload.metadata else None,
             metadata=payload.metadata,
+            thread_id=payload.metadata.get("thread_id") if payload.metadata else None,
         )
 
         if supervisor_output.pending_actions:
@@ -38,4 +35,31 @@ class OrchestratorService:
             answer=supervisor_output.answer,
             diagnostics=supervisor_output.diagnostics,
             pending_actions=pending_actions,
+            thread_id=thread_id,
+            hitl_waiting=hitl_waiting,
+        )
+
+    async def resume_query(
+        self,
+        thread_id: str,
+        approved_action_ids: list[int] | None = None,
+        rejected_action_ids: list[int] | None = None,
+    ) -> QueryResponse:
+        """
+        Resume a paused query after human approval/rejection.
+        """
+        supervisor_output = await self._graph.resume(
+            thread_id=thread_id,
+            approved_action_ids=approved_action_ids,
+            rejected_action_ids=rejected_action_ids,
+        )
+
+        pending_actions = await self._hitl_service.list_pending()
+
+        return QueryResponse(
+            answer=supervisor_output.answer,
+            diagnostics=supervisor_output.diagnostics,
+            pending_actions=pending_actions,
+            thread_id=thread_id,
+            hitl_waiting=False,
         )
