@@ -20,7 +20,7 @@ class SalesAgent(BaseAgent):
                SUM(revenue) AS revenue,
                SUM(qty) AS units
         FROM orders
-        WHERE timestamp >= NOW() - INTERVAL :window_days || ' days'
+        WHERE timestamp >= NOW() - make_interval(days => :window_days)
         GROUP BY bucket
         ORDER BY bucket DESC;
         """

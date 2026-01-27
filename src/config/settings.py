@@ -50,10 +50,11 @@ class Settings(BaseSettings):
 
     # MCP Endpoints
     mcp_sql_endpoint: AnyHttpUrl | None = Field(default=None, alias="MCP_SQL_ENDPOINT")
-    mcp_inventory_endpoint: AnyHttpUrl | None = Field(default=None, alias="MCP_INVENTORY_ENDPOINT")
-    mcp_marketing_endpoint: AnyHttpUrl | None = Field(default=None, alias="MCP_MARKETING_ENDPOINT")
-    mcp_support_endpoint: AnyHttpUrl | None = Field(default=None, alias="MCP_SUPPORT_ENDPOINT")
-    mcp_memory_endpoint: AnyHttpUrl | None = Field(default=None, alias="MCP_MEMORY_ENDPOINT")
+    mcp_api_key: str | None = Field(default=None, alias="MCP_API_KEY")
+    # mcp_inventory_endpoint: AnyHttpUrl | None = Field(default=None, alias="MCP_INVENTORY_ENDPOINT")
+    # mcp_marketing_endpoint: AnyHttpUrl | None = Field(default=None, alias="MCP_MARKETING_ENDPOINT")
+    # mcp_support_endpoint: AnyHttpUrl | None = Field(default=None, alias="MCP_SUPPORT_ENDPOINT")
+    # mcp_memory_endpoint: AnyHttpUrl | None = Field(default=None, alias="MCP_MEMORY_ENDPOINT")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

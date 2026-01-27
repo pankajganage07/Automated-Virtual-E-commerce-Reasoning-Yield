@@ -19,7 +19,7 @@ from opsbrain_graph.agents import (
     DataAnalystAgent,
     HistorianAgent,
 )
-from opsbrain_graph.state import GraphState, PendingActionProposal
+from opsbrain_graph.state import GraphState, PendingActionProposal, add_warning
 from opsbrain_graph.supervisor import Supervisor, SupervisorOutput
 from opsbrain_graph.tools import ToolRegistry
 from opsbrain_graph.memory import MemoryService, MemoryIncident
@@ -68,22 +68,23 @@ class OperationsGraph:
     async def _record_memory_node(self, state: GraphState) -> GraphState:
         if not self.memory_service:
             return state
-        if not state.metadata.get("persist_incident", False):
+        if not state["metadata"].get("persist_incident", False):
             return state
 
-        summary = state.diagnosis.narrative.strip()
+        diagnosis = state["diagnosis"]
+        summary = diagnosis.get("narrative", "").strip()
         if not summary:
             return state
 
-        root_cause = "; ".join(state.diagnosis.key_findings[:3]) or None
+        root_cause = "; ".join(diagnosis.get("key_findings", [])[:3]) or None
         actions = (
             "; ".join(
                 f"{action.action_type}: {action.reasoning}"
-                for action in state.pending_action_proposals
+                for action in state["pending_action_proposals"]
             )
             or None
         )
-        outcome = "pending_approval" if state.hitl_wait else "analysis_shared"
+        outcome = "pending_approval" if state["hitl_wait"] else "analysis_shared"
 
         incident = MemoryIncident(
             incident_summary=summary,
@@ -92,11 +93,12 @@ class OperationsGraph:
             outcome=outcome,
         )
         await self.memory_service.save_incident(incident)
+        return state
 
     async def _hitl_gate_node(self, state: GraphState) -> GraphState:
-        if state.hitl_wait:
-            state.metadata["wait_state"] = {
-                "pending_action_count": len(state.pending_action_proposals),
+        if state["hitl_wait"]:
+            state["metadata"]["wait_state"] = {
+                "pending_action_count": len(state["pending_action_proposals"]),
                 "note": "Awaiting human approval before execution.",
             }
         return state
@@ -109,7 +111,7 @@ class OperationsGraph:
     ) -> SupervisorOutput:
         state = self.supervisor.initialize_state(user_query, conversation_history)
         if metadata:
-            state.metadata.update(metadata)
+            state["metadata"].update(metadata)
 
         final_state: GraphState = await self._graph.ainvoke(state)
         return self.supervisor.synthesize(final_state)
@@ -119,18 +121,18 @@ class OperationsGraph:
         return state
 
     async def _run_tasks_node(self, state: GraphState) -> GraphState:
-        tasks = state.battle_plan
+        tasks = state["battle_plan"]
         if not tasks:
-            state.add_warning("Supervisor produced no tasks; skipping worker execution.")
+            add_warning(state, "Supervisor produced no tasks; skipping worker execution.")
             return state
 
         ctx = AgentRunContext(
-            user_query=state.user_query,
-            conversation_history=state.conversation_history,
-            memory_context=state.memory_context,
+            user_query=state["user_query"],
+            conversation_history=state["conversation_history"],
+            memory_context=state["memory_context"],
             state_snapshot={
-                "agent_findings": state.agent_findings,
-                "recommendations": [rec.__dict__ for rec in state.recommendations],
+                "agent_findings": state["agent_findings"],
+                "recommendations": [rec.__dict__ for rec in state["recommendations"]],
             },
         )
 

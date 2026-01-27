@@ -6,7 +6,14 @@ from typing import Any, Sequence
 
 from config import Settings
 from opsbrain_graph.agents import AgentResult, AgentTask, AgentRecommendation
-from opsbrain_graph.state import DiagnosisSummary, GraphState, PendingActionProposal
+from opsbrain_graph.state import (
+    DiagnosisSummary,
+    GraphState,
+    PendingActionProposal,
+    create_initial_state,
+    record_agent_result,
+    add_warning,
+)
 
 
 @dataclass
@@ -30,13 +37,13 @@ class Supervisor:
         user_query: str,
         conversation_history: Sequence[dict[str, Any]] | None = None,
     ) -> GraphState:
-        return GraphState(
+        return create_initial_state(
             user_query=user_query,
             conversation_history=list(conversation_history or []),
         )
 
     def plan(self, state: GraphState) -> list[AgentTask]:
-        query = state.user_query.lower()
+        query = state["user_query"].lower()
 
         tasks: list[AgentTask] = []
 
@@ -55,7 +62,9 @@ class Supervisor:
                 AgentTask(
                     agent="inventory",
                     objective="Check stock levels for key products mentioned or top sellers.",
-                    parameters={"product_ids": state.metadata.get("focus_product_ids", [1, 2, 3])},
+                    parameters={
+                        "product_ids": state["metadata"].get("focus_product_ids", [1, 2, 3])
+                    },
                     result_slot="agent_findings.inventory",
                 )
             )
@@ -85,12 +94,12 @@ class Supervisor:
                 AgentTask(
                     agent="historian",
                     objective="Retrieve similar past incidents.",
-                    parameters={"mode": "query", "query": state.user_query},
+                    parameters={"mode": "query", "query": state["user_query"]},
                     result_slot="memory_context",
                 )
             )
 
-        state.battle_plan = tasks
+        state["battle_plan"] = tasks
         return tasks
 
     def incorporate_agent_result(
@@ -100,20 +109,21 @@ class Supervisor:
         result: AgentResult,
     ) -> None:
         if result.status == "success":
-            state.record_agent_result(
+            record_agent_result(
+                state,
                 agent_name=agent_name,
                 findings=result.findings,
                 insights=result.insights,
                 recommendations=result.recommendations,
             )
         else:
-            state.add_warning(f"{agent_name} agent failed: {result.errors}")
+            add_warning(state, f"{agent_name} agent failed: {result.errors}")
 
     def synthesize(self, state: GraphState) -> SupervisorOutput:
         summary = self._build_diagnosis(state)
         recommendations = self._collect_pending_actions(state)
 
-        answer = self._compose_answer(summary, recommendations, state.system_warnings)
+        answer = self._compose_answer(summary, recommendations, state["system_warnings"])
         diagnostics = self._compile_diagnostics(state)
 
         return SupervisorOutput(
@@ -125,7 +135,7 @@ class Supervisor:
 
     def _build_diagnosis(self, state: GraphState) -> DiagnosisSummary:
         insights = []
-        for agent, agent_insights in state.agent_insights.items():
+        for agent, agent_insights in state["agent_insights"].items():
             for insight in agent_insights:
                 insights.append(f"{agent.title()}: {insight}")
 
@@ -139,17 +149,21 @@ class Supervisor:
             key_findings=insights,
             confidence=confidence,
         )
-        state.diagnosis = summary
+        state["diagnosis"] = {
+            "narrative": narrative,
+            "key_findings": insights,
+            "confidence": confidence,
+        }
         return summary
 
     def _collect_pending_actions(self, state: GraphState) -> list[PendingActionProposal]:
         proposals: list[PendingActionProposal] = []
 
-        for recommendation in state.recommendations:
+        for recommendation in state["recommendations"]:
             proposal = PendingActionProposal(
                 agent_name=recommendation.action_type.split("_")[0],
                 action_type=(
-                    rec.item.action_type
+                    rec.action_type
                     if isinstance(rec := recommendation, AgentRecommendation)
                     else ""
                 ),
@@ -159,8 +173,8 @@ class Supervisor:
             )
             proposals.append(proposal)
 
-        state.pending_action_proposals = proposals
-        state.hitl_wait = bool(proposals)
+        state["pending_action_proposals"] = proposals
+        state["hitl_wait"] = bool(proposals)
         return proposals
 
     def _compose_answer(
@@ -184,9 +198,9 @@ class Supervisor:
         return "\n".join(lines).strip()
 
     def _compile_diagnostics(self, state: GraphState) -> list[str]:
-        diag = [f"Agents executed: {', '.join(state.agent_findings.keys()) or 'none'}"]
-        if state.hitl_wait:
+        diag = [f"Agents executed: {', '.join(state['agent_findings'].keys()) or 'none'}"]
+        if state["hitl_wait"]:
             diag.append("HITL pending actions detected.")
-        if state.system_warnings:
+        if state["system_warnings"]:
             diag.append("Warnings present; see answer body.")
         return diag

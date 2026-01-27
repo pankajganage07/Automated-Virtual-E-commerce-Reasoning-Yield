@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Annotated
+from typing_extensions import TypedDict
+
+from langgraph.graph.message import add_messages
 
 from opsbrain_graph.agents.base_agent import AgentRecommendation, AgentTask
 
@@ -22,41 +25,73 @@ class DiagnosisSummary:
     confidence: float = 0.5
 
 
-@dataclass
-class GraphState:
+def _default_diagnosis() -> dict[str, Any]:
+    return {"narrative": "", "key_findings": [], "confidence": 0.5}
+
+
+class GraphState(TypedDict, total=False):
+    """
+    LangGraph state using TypedDict for proper serialization.
+    """
+
     user_query: str
-    conversation_history: list[dict[str, Any]] = field(default_factory=list)
+    conversation_history: list[dict[str, Any]]
 
-    battle_plan: list[AgentTask] = field(default_factory=list)
-    agent_findings: dict[str, dict[str, Any]] = field(default_factory=dict)
-    agent_insights: dict[str, list[str]] = field(default_factory=dict)
+    battle_plan: list[AgentTask]
+    agent_findings: dict[str, dict[str, Any]]
+    agent_insights: dict[str, list[str]]
 
-    structured_evidence: list[dict[str, Any]] = field(default_factory=list)
-    diagnosis: DiagnosisSummary = field(default_factory=DiagnosisSummary)
+    structured_evidence: list[dict[str, Any]]
+    diagnosis: dict[str, Any]
 
-    recommendations: list[AgentRecommendation] = field(default_factory=list)
-    pending_action_proposals: list[PendingActionProposal] = field(default_factory=list)
+    recommendations: list[AgentRecommendation]
+    pending_action_proposals: list[PendingActionProposal]
 
-    memory_context: list[dict[str, Any]] = field(default_factory=list)
-    system_warnings: list[str] = field(default_factory=list)
+    memory_context: list[dict[str, Any]]
+    system_warnings: list[str]
 
-    hitl_wait: bool = False
-    metadata: dict[str, Any] = field(default_factory=dict)
+    hitl_wait: bool
+    metadata: dict[str, Any]
 
-    def record_agent_result(
-        self,
-        agent_name: str,
-        findings: dict[str, Any],
-        insights: list[str],
-        recommendations: list[AgentRecommendation],
-    ) -> None:
 
-        if agent_name == "historian" and "matches" in findings:
-            self.memory_context = findings["matches"]
+def create_initial_state(
+    user_query: str,
+    conversation_history: list[dict[str, Any]] | None = None,
+) -> GraphState:
+    """Factory function to create a properly initialized GraphState."""
+    return GraphState(
+        user_query=user_query,
+        conversation_history=conversation_history or [],
+        battle_plan=[],
+        agent_findings={},
+        agent_insights={},
+        structured_evidence=[],
+        diagnosis=_default_diagnosis(),
+        recommendations=[],
+        pending_action_proposals=[],
+        memory_context=[],
+        system_warnings=[],
+        hitl_wait=False,
+        metadata={},
+    )
 
-        self.agent_findings[agent_name] = findings
-        self.agent_insights[agent_name] = insights
-        self.recommendations.extend(recommendations)
 
-    def add_warning(self, message: str) -> None:
-        self.system_warnings.append(message)
+def record_agent_result(
+    state: GraphState,
+    agent_name: str,
+    findings: dict[str, Any],
+    insights: list[str],
+    recommendations: list[AgentRecommendation],
+) -> None:
+    """Helper function to record agent results into state."""
+    if agent_name == "historian" and "matches" in findings:
+        state["memory_context"] = findings["matches"]
+
+    state["agent_findings"][agent_name] = findings
+    state["agent_insights"][agent_name] = insights
+    state["recommendations"].extend(recommendations)
+
+
+def add_warning(state: GraphState, message: str) -> None:
+    """Helper function to add a warning to state."""
+    state["system_warnings"].append(message)
