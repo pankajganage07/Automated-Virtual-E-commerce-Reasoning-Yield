@@ -1,0 +1,19 @@
+id,product_id,sentiment,issue_category,description,days_ago
+1,1,0.2,shipping,Delayed delivery for the water bottle. Expected 3 days but took 10.,0
+2,3,0.3,quality,Yoga mat edges fraying after a week of use.,0
+3,2,0.15,defect,Smart bulb stopped working after 2 days. Very disappointed.,1
+4,5,0.8,inquiry,When will the ZenAir Purifier be back in stock?,1
+5,4,0.25,quality,One knife in the set arrived with a loose handle.,1
+6,1,0.4,shipping,Package arrived damaged but product was okay.,2
+7,6,0.35,quality,Dumbbell rubber coating peeling off already.,2
+8,3,0.1,refund,Want to return yoga mat - not as described in listing.,2
+9,2,0.5,support,Need help connecting the bulb to my smart home system.,3
+10,8,0.2,defect,Thermostat display flickering intermittently.,3
+11,1,0.6,inquiry,Is the EcoWater Bottle dishwasher safe?,3
+12,5,0.15,complaint,Ordered purifier but it was out of stock - no notification!,4
+13,4,0.3,shipping,Wrong item delivered. Received plates instead of knives.,4
+14,7,0.45,quality,Filter replacement instructions unclear.,5
+15,3,0.2,refund,Mat has chemical smell that won't go away.,5
+16,2,0.25,defect,Bulb flickers when dimmed below 50%.,6
+17,10,0.1,quality,Plates arrived with chips on the edges.,6
+18,6,0.55,support,Need assembly instructions for dumbbell rack.,7

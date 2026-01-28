@@ -1,0 +1,11 @@
+id,name,category,price,stock_qty,low_stock_threshold
+1,EcoWater Bottle,Home & Kitchen,24.99,120,30
+2,LumaSmart Bulb,Electronics,14.99,8,20
+3,Flexifit Yoga Mat,Fitness,49.99,5,15
+4,ProChef Knife Set,Home & Kitchen,89.99,45,10
+5,ZenAir Purifier,Electronics,149.99,0,5
+6,PowerFit Dumbbell,Fitness,34.99,60,20
+7,AquaFilter Pitcher,Home & Kitchen,29.99,25,15
+8,SmartThermo Controller,Electronics,79.99,12,10
+9,YogaBlock Pro,Fitness,19.99,100,25
+10,EcoPlate Set,Home & Kitchen,44.99,3,10

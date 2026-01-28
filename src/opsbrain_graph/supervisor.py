@@ -44,20 +44,22 @@ def generate_planning_prompt(agent_metadata: dict[str, AgentMetadata]) -> str:
         lines.append(f"- {meta.description}")
 
         if meta.capabilities:
-            lines.append("- Capabilities:")
+            lines.append("- Capabilities (use the name as 'mode' parameter):")
             for cap in meta.capabilities:
                 params_desc = ""
                 if cap.parameters:
                     params_list = [f"{k}: {v}" for k, v in cap.parameters.items()]
                     params_desc = f" (parameters: {'; '.join(params_list)})"
-                lines.append(f"  * {cap.name}: {cap.description}{params_desc}")
+                lines.append(f'  * mode="{cap.name}": {cap.description}{params_desc}')
+                if cap.example_queries:
+                    lines.append(f"    Examples: {'; '.join(cap.example_queries[:2])}")
 
         if meta.keywords:
-            lines.append(f"- Trigger keywords: {', '.join(meta.keywords[:5])}")
+            lines.append(f"- Trigger keywords: {', '.join(meta.keywords[:7])}")
 
         lines.append("")
 
-    # Add task assignment rules
+    # Add task assignment rules with comprehensive examples
     lines.extend(
         [
             "## Task Assignment Rules:",
@@ -67,25 +69,66 @@ def generate_planning_prompt(agent_metadata: dict[str, AgentMetadata]) -> str:
             "4. For product-related issues, consider both SALES and INVENTORY",
             "5. Be specific with parameters - extract numbers, time windows, and filters from the query",
             "6. Use agent keywords to help identify which agents are relevant",
-            "7. CRITICAL: Always specify the 'mode' parameter when an agent has multiple modes",
-            "   - For questions about 'top products', 'best sellers', use mode='top_products'",
-            "   - For questions about 'trends', 'performance', 'revenue over time', use mode='trends'",
+            "",
+            "## CRITICAL RULES FOR MODE SELECTION:",
+            "7. ALWAYS specify the 'mode' parameter - match it to the capability name",
+            "8. For 'top products', 'best sellers', 'top selling' → mode='top_products'",
+            "9. For 'compare', 'vs', 'versus', 'compared to' → mode='compare_periods'",
+            "10. For 'region', 'regional', 'by region' → mode='regional'",
+            "11. For 'channel', 'by channel', 'mobile vs web' → mode='channel'",
+            "12. For 'which products contributed', 'product impact' → mode='product_contribution'",
+            "13. For 'low stock', 'out of stock', 'close to stockout' → mode='low_stock_scan'",
+            "14. For 'top sellers stock', 'best sellers inventory' → mode='top_sellers_stock'",
+            "15. For 'paused campaigns', 'underperforming' → mode='underperforming'",
+            "16. For 'campaign performance vs', 'campaign comparison' → mode='compare_performance'",
+            "17. For 'common issues', 'most reported' → mode='common_issues'",
+            "18. For 'complaint trends', 'did complaints increase' → mode='complaint_trends'",
+            "",
+            "## Cross-Domain Questions:",
+            "For questions that span multiple domains, assign multiple agents:",
+            "- 'Was the sales drop caused by inventory, marketing, or support issues?' → sales, inventory, marketing, support agents",
+            "- 'Show all contributing factors' → sales, inventory, marketing, support agents",
+            "- 'Correlate complaints with sales' → sales + support agents",
             "",
             "## Output Format:",
             "Return a JSON array of tasks. Each task must have:",
             "- agent: One of " + ", ".join(f'"{name}"' for name in sorted(agent_metadata.keys())),
             "- objective: Clear description of what the agent should accomplish",
-            "- parameters: Dict with mode, window_days, limit, product_ids, etc. ALWAYS include 'mode' for sales agent",
+            "- parameters: Dict with 'mode' (REQUIRED), plus window_days, limit, product_ids, etc.",
             "- priority: 1 (highest) to 5 (lowest) - for execution ordering",
             "",
-            "Example for 'top products' question:",
-            "[",
-            '  {"agent": "sales", "objective": "Find top selling products", "parameters": {"mode": "top_products", "window_days": 7, "limit": 5}, "priority": 1}',
-            "]",
+            "## Examples:",
             "",
-            "Example for 'sales trends' question:",
+            "Question: 'What are the top selling products?'",
+            '[{"agent": "sales", "objective": "Find top selling products", "parameters": {"mode": "top_products", "window_days": 7, "limit": 5}, "priority": 1}]',
+            "",
+            "Question: 'Compare yesterday sales to last week'",
+            '[{"agent": "sales", "objective": "Compare sales periods", "parameters": {"mode": "compare_periods", "current_days": 1, "previous_days": 7}, "priority": 1}]',
+            "",
+            "Question: 'Did any region perform worse than usual?'",
+            '[{"agent": "sales", "objective": "Analyze regional sales", "parameters": {"mode": "regional", "window_days": 7, "compare_to_avg": true}, "priority": 1}]',
+            "",
+            "Question: 'Which products are close to stock-out?'",
+            '[{"agent": "inventory", "objective": "Scan for low stock products", "parameters": {"mode": "low_stock_scan"}, "priority": 1}]',
+            "",
+            "Question: 'Were any top-selling products out of stock?'",
+            '[{"agent": "inventory", "objective": "Check top sellers stock", "parameters": {"mode": "top_sellers_stock", "window_days": 7, "top_n": 10}, "priority": 1}]',
+            "",
+            "Question: 'Were any campaigns paused or underperforming?'",
+            '[{"agent": "marketing", "objective": "Find underperforming campaigns", "parameters": {"mode": "underperforming", "include_paused": true}, "priority": 1}]',
+            "",
+            "Question: 'Is there a common issue reported by customers?'",
+            '[{"agent": "support", "objective": "Find common customer issues", "parameters": {"mode": "common_issues", "window_days": 7}, "priority": 1}]',
+            "",
+            "Question: 'Did customer complaints increase yesterday?'",
+            '[{"agent": "support", "objective": "Analyze complaint trends", "parameters": {"mode": "complaint_trends", "current_days": 1, "previous_days": 7}, "priority": 1}]',
+            "",
+            "Question: 'Summarize yesterday business health'",
             "[",
-            '  {"agent": "sales", "objective": "Analyze revenue trends", "parameters": {"mode": "trends", "window_days": 7}, "priority": 1}',
+            '  {"agent": "sales", "objective": "Analyze sales trends", "parameters": {"mode": "trends", "window_days": 1}, "priority": 1},',
+            '  {"agent": "inventory", "objective": "Check for stock issues", "parameters": {"mode": "low_stock_scan"}, "priority": 1},',
+            '  {"agent": "marketing", "objective": "Check campaign performance", "parameters": {"mode": "underperforming"}, "priority": 1},',
+            '  {"agent": "support", "objective": "Analyze support sentiment", "parameters": {"mode": "sentiment_analysis", "window_days": 1}, "priority": 1}',
             "]",
             "",
             "IMPORTANT: Return ONLY the JSON array, no additional text or markdown.",

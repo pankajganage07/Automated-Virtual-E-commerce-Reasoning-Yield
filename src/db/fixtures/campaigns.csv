@@ -1,0 +1,9 @@
+id,name,budget,spend,clicks,conversions,status
+1,Spring Hydration Push,1500.00,450.00,900,80,active
+2,Smart Home Flash Sale,2000.00,1200.00,1500,120,active
+3,Fitness Clearance,800.00,600.00,500,30,paused
+4,Kitchen Essentials Promo,1200.00,1180.00,800,45,active
+5,Electronics Weekend Deal,2500.00,2400.00,2000,180,active
+6,Summer Fitness Campaign,1000.00,950.00,400,5,active
+7,Home Refresh Sale,600.00,100.00,50,0,paused
+8,New Year Health Push,1800.00,200.00,1200,95,active

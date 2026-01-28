@@ -87,6 +87,55 @@ class UpdateInventoryResponse(BaseModel):
     error: str | None = None
 
 
+# New request/response models for additional inventory tools
+class GetLowStockProductsRequest(BaseModel):
+    include_out_of_stock: bool = Field(default=True)
+    limit: int = Field(default=20, ge=1, le=100)
+
+
+class LowStockProduct(BaseModel):
+    product_id: int
+    name: str
+    category: str | None = None
+    stock_qty: int
+    low_stock_threshold: int
+    buffer: int
+    status: str
+    needs_restock: bool = True
+
+
+class GetLowStockProductsResponse(BaseModel):
+    low_stock_products: list[LowStockProduct] = Field(default_factory=list)
+    total_count: int = 0
+    out_of_stock_count: int = 0
+    critical_count: int = 0
+    has_critical: bool = False
+
+
+class CheckTopSellersStockRequest(BaseModel):
+    window_days: int = Field(default=7, ge=1, le=30)
+    top_n: int = Field(default=10, ge=1, le=50)
+
+
+class TopSellerStock(BaseModel):
+    product_id: int
+    name: str
+    revenue: float
+    units_sold: int
+    stock_qty: int
+    low_stock_threshold: int
+    stock_status: str
+
+
+class CheckTopSellersStockResponse(BaseModel):
+    window_days: int = 7
+    top_sellers: list[TopSellerStock] = Field(default_factory=list)
+    out_of_stock_top_sellers: list[TopSellerStock] = Field(default_factory=list)
+    low_stock_top_sellers: list[TopSellerStock] = Field(default_factory=list)
+    has_stock_issues: bool = False
+    potential_revenue_at_risk: float = 0
+
+
 class InventoryToolset:
     def __init__(self, client: MCPClient) -> None:
         self._client = client
@@ -106,6 +155,24 @@ class InventoryToolset:
             return PredictStockOutResponse.model_validate(result)
         except ValidationError as exc:
             raise MCPError(f"Invalid response for predict_stock_out: {exc}") from exc
+
+    async def get_low_stock_products(
+        self, payload: GetLowStockProductsRequest
+    ) -> GetLowStockProductsResponse:
+        result = await self._client.invoke("get_low_stock_products", payload.model_dump())
+        try:
+            return GetLowStockProductsResponse.model_validate(result)
+        except ValidationError as exc:
+            raise MCPError(f"Invalid response for get_low_stock_products: {exc}") from exc
+
+    async def check_top_sellers_stock(
+        self, payload: CheckTopSellersStockRequest
+    ) -> CheckTopSellersStockResponse:
+        result = await self._client.invoke("check_top_sellers_stock", payload.model_dump())
+        try:
+            return CheckTopSellersStockResponse.model_validate(result)
+        except ValidationError as exc:
+            raise MCPError(f"Invalid response for check_top_sellers_stock: {exc}") from exc
 
     async def restock_item(self, payload: RestockItemRequest) -> RestockItemResponse:
         """Restock a product (HITL action - calls update_inventory MCP tool)."""

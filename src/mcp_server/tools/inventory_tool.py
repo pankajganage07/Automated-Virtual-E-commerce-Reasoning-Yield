@@ -137,3 +137,171 @@ class PredictStockOutTool(BaseTool):
             "confidence": round(confidence, 2),
             "risk_level": risk_level,
         }
+
+
+# =============================================================================
+# GET LOW STOCK PRODUCTS TOOL
+# =============================================================================
+
+
+class LowStockProductsPayload(BaseModel):
+    """Find all products below their stock threshold."""
+
+    include_out_of_stock: bool = Field(default=True, description="Include products with 0 stock")
+    limit: int = Field(default=20, ge=1, le=100)
+
+
+class GetLowStockProductsTool(BaseTool):
+    """
+    Find all products that are at or below their low_stock_threshold.
+    Does NOT require product_ids - scans entire inventory.
+    """
+
+    name = "get_low_stock_products"
+
+    def request_model(self) -> type[BaseModel]:
+        return LowStockProductsPayload
+
+    async def run(self, session, payload: LowStockProductsPayload) -> dict[str, Any]:
+        # Get all products below threshold
+        stmt = text(
+            """
+            SELECT 
+                p.id,
+                p.name,
+                p.category,
+                p.stock_qty,
+                p.low_stock_threshold,
+                p.stock_qty - p.low_stock_threshold AS buffer,
+                CASE 
+                    WHEN p.stock_qty = 0 THEN 'out_of_stock'
+                    WHEN p.stock_qty <= p.low_stock_threshold THEN 'critical'
+                    WHEN p.stock_qty <= p.low_stock_threshold * 1.5 THEN 'warning'
+                    ELSE 'ok'
+                END AS status
+            FROM products p
+            WHERE p.stock_qty <= p.low_stock_threshold
+               OR (:include_out_of_stock AND p.stock_qty = 0)
+            ORDER BY buffer ASC, p.stock_qty ASC
+            LIMIT :limit
+        """
+        )
+        result = await session.execute(
+            stmt, {"include_out_of_stock": payload.include_out_of_stock, "limit": payload.limit}
+        )
+
+        products = []
+        out_of_stock_count = 0
+        critical_count = 0
+
+        for row in result:
+            product = {
+                "product_id": row.id,
+                "name": row.name,
+                "category": row.category,
+                "stock_qty": row.stock_qty,
+                "low_stock_threshold": row.low_stock_threshold,
+                "buffer": row.buffer,
+                "status": row.status,
+                "needs_restock": True,
+            }
+            products.append(product)
+
+            if row.stock_qty == 0:
+                out_of_stock_count += 1
+            if row.status == "critical":
+                critical_count += 1
+
+        return {
+            "low_stock_products": products,
+            "total_count": len(products),
+            "out_of_stock_count": out_of_stock_count,
+            "critical_count": critical_count,
+            "has_critical": critical_count > 0 or out_of_stock_count > 0,
+        }
+
+
+# =============================================================================
+# CHECK TOP SELLERS STOCK TOOL
+# =============================================================================
+
+
+class TopSellersStockPayload(BaseModel):
+    """Check if top selling products have stock issues."""
+
+    window_days: int = Field(default=7, ge=1, le=30)
+    top_n: int = Field(default=10, ge=1, le=50)
+
+
+class CheckTopSellersStockTool(BaseTool):
+    """
+    Check if any top-selling products are out of stock or low on stock.
+    Answers: "Were any top-selling products out of stock?"
+    """
+
+    name = "check_top_sellers_stock"
+
+    def request_model(self) -> type[BaseModel]:
+        return TopSellersStockPayload
+
+    async def run(self, session, payload: TopSellersStockPayload) -> dict[str, Any]:
+        # Get top sellers with their current stock
+        stmt = text(
+            """
+            SELECT
+                p.id,
+                p.name,
+                p.stock_qty,
+                p.low_stock_threshold,
+                COALESCE(SUM(o.revenue), 0) AS total_revenue,
+                COALESCE(SUM(o.qty), 0) AS units_sold,
+                CASE 
+                    WHEN p.stock_qty = 0 THEN 'out_of_stock'
+                    WHEN p.stock_qty <= p.low_stock_threshold THEN 'low_stock'
+                    ELSE 'in_stock'
+                END AS stock_status
+            FROM products p
+            LEFT JOIN orders o ON o.product_id = p.id
+                AND o.timestamp >= NOW() - INTERVAL :window_days || ' days'
+            GROUP BY p.id, p.name, p.stock_qty, p.low_stock_threshold
+            HAVING COALESCE(SUM(o.revenue), 0) > 0
+            ORDER BY total_revenue DESC
+            LIMIT :top_n
+        """
+        )
+        result = await session.execute(
+            stmt, {"window_days": payload.window_days, "top_n": payload.top_n}
+        )
+
+        products = []
+        out_of_stock = []
+        low_stock = []
+
+        for row in result:
+            product = {
+                "product_id": row.id,
+                "name": row.name,
+                "revenue": round(float(row.total_revenue), 2),
+                "units_sold": row.units_sold,
+                "stock_qty": row.stock_qty,
+                "low_stock_threshold": row.low_stock_threshold,
+                "stock_status": row.stock_status,
+            }
+            products.append(product)
+
+            if row.stock_status == "out_of_stock":
+                out_of_stock.append(product)
+            elif row.stock_status == "low_stock":
+                low_stock.append(product)
+
+        # Calculate potential lost revenue
+        potential_lost_revenue = sum(p["revenue"] for p in out_of_stock)
+
+        return {
+            "window_days": payload.window_days,
+            "top_sellers": products,
+            "out_of_stock_top_sellers": out_of_stock,
+            "low_stock_top_sellers": low_stock,
+            "has_stock_issues": len(out_of_stock) > 0 or len(low_stock) > 0,
+            "potential_revenue_at_risk": round(potential_lost_revenue, 2),
+        }

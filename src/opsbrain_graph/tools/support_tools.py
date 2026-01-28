@@ -116,6 +116,57 @@ class PrioritizeTicketResponse(BaseModel):
     error: str | None = None
 
 
+# New request/response models for additional support tools
+class GetCommonIssuesRequest(BaseModel):
+    window_days: int = Field(default=7, ge=1, le=30)
+    min_count: int = Field(default=2, ge=1)
+    limit: int = Field(default=10, ge=1, le=50)
+
+
+class CommonIssue(BaseModel):
+    issue_category: str
+    ticket_count: int
+    avg_sentiment: float
+    negative_ratio: float
+    sample_descriptions: list[str] = Field(default_factory=list)
+    affected_products: list[str] = Field(default_factory=list)
+
+
+class GetCommonIssuesResponse(BaseModel):
+    window_days: int = 7
+    common_issues: list[CommonIssue] = Field(default_factory=list)
+    most_common_issue: str | None = None
+    total_tickets_analyzed: int = 0
+    has_critical_issues: bool = False
+
+
+class GetComplaintTrendsRequest(BaseModel):
+    current_days: int = Field(default=1, ge=1, le=30)
+    previous_days: int = Field(default=7, ge=1, le=30)
+    issue_category: str | None = None
+
+
+class ComplaintCategoryTrend(BaseModel):
+    issue_category: str
+    current_count: int
+    previous_avg: float
+    change_pct: float
+    trend: str
+
+
+class GetComplaintTrendsResponse(BaseModel):
+    current_days: int = 1
+    previous_days: int = 7
+    current_total: int = 0
+    previous_avg: float = 0
+    overall_change_pct: float = 0
+    complaint_increased: bool = False
+    category_trends: list[ComplaintCategoryTrend] = Field(default_factory=list)
+    most_increased_category: str | None = None
+    current_avg_sentiment: float | None = None
+    previous_avg_sentiment: float | None = None
+
+
 class SupportToolset:
     def __init__(self, client: MCPClient) -> None:
         self._client = client
@@ -167,3 +218,21 @@ class SupportToolset:
             return PrioritizeTicketResponse.model_validate(result)
         except ValidationError as exc:
             raise MCPError(f"Invalid response for prioritize_ticket: {exc}") from exc
+
+    async def get_common_issues(self, payload: GetCommonIssuesRequest) -> GetCommonIssuesResponse:
+        """Get most common customer issues."""
+        result = await self._client.invoke("get_common_issues", payload.model_dump())
+        try:
+            return GetCommonIssuesResponse.model_validate(result)
+        except ValidationError as exc:
+            raise MCPError(f"Invalid response for get_common_issues: {exc}") from exc
+
+    async def get_complaint_trends(
+        self, payload: GetComplaintTrendsRequest
+    ) -> GetComplaintTrendsResponse:
+        """Compare complaint volume between periods."""
+        result = await self._client.invoke("get_complaint_trends", payload.model_dump())
+        try:
+            return GetComplaintTrendsResponse.model_validate(result)
+        except ValidationError as exc:
+            raise MCPError(f"Invalid response for get_complaint_trends: {exc}") from exc

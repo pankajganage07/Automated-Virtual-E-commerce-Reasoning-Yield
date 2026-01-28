@@ -16,6 +16,10 @@ from opsbrain_graph.tools.sql_tools import (
     ExecuteSQLRequest,
     GetTopProductsRequest,
     GetSalesSummaryRequest,
+    CompareSalesPeriodsRequest,
+    GetRegionalSalesRequest,
+    GetChannelPerformanceRequest,
+    GetProductContributionRequest,
 )
 
 logger = logging.getLogger("agent.sales")
@@ -28,7 +32,7 @@ class SalesAgent(BaseAgent):
     metadata = AgentMetadata(
         name="sales",
         display_name="SALES",
-        description="Analyzes revenue trends, sales performance, and detects anomalies. Can identify top-selling products and revenue patterns.",
+        description="Analyzes revenue trends, sales performance, and detects anomalies. Can identify top-selling products, compare periods, analyze by region/channel, and identify revenue contributors.",
         capabilities=[
             AgentCapability(
                 name="trends",
@@ -56,6 +60,58 @@ class SalesAgent(BaseAgent):
                     "Best sellers last week",
                 ],
             ),
+            AgentCapability(
+                name="compare_periods",
+                description="Compare sales between current and previous periods to identify changes",
+                parameters={
+                    "current_days": "Current period in days (default: 1)",
+                    "previous_days": "Previous period in days for comparison (default: 7)",
+                },
+                example_queries=[
+                    "Compare yesterday's sales with last week",
+                    "How does this week compare to last week?",
+                    "Did sales recover today vs yesterday?",
+                ],
+            ),
+            AgentCapability(
+                name="regional",
+                description="Analyze sales performance by geographic region",
+                parameters={
+                    "window_days": "Time period to analyze (default: 7)",
+                    "compare_to_avg": "Compare to historical average (default: true)",
+                },
+                example_queries=[
+                    "Did any region perform worse than usual?",
+                    "Which region had the best sales?",
+                    "Regional sales breakdown",
+                ],
+            ),
+            AgentCapability(
+                name="channel",
+                description="Analyze sales performance by sales channel (web, mobile, etc.)",
+                parameters={
+                    "window_days": "Time period to analyze (default: 7)",
+                },
+                example_queries=[
+                    "Which channel performed the worst yesterday?",
+                    "Channel performance breakdown",
+                    "Are mobile sales up or down?",
+                ],
+            ),
+            AgentCapability(
+                name="product_contribution",
+                description="Identify which products contributed most to revenue changes",
+                parameters={
+                    "current_days": "Current period in days (default: 1)",
+                    "previous_days": "Previous period for comparison (default: 7)",
+                    "limit": "Number of products to analyze (default: 10)",
+                },
+                example_queries=[
+                    "Which products contributed most to the revenue drop?",
+                    "What products are driving revenue growth?",
+                    "Product-level revenue impact",
+                ],
+            ),
         ],
         keywords=[
             "sale",
@@ -68,6 +124,9 @@ class SalesAgent(BaseAgent):
             "top",
             "best",
             "product",
+            "region",
+            "channel",
+            "compare",
         ],
         priority_boost=["revenue", "sales drop", "urgent"],
     )
@@ -78,6 +137,14 @@ class SalesAgent(BaseAgent):
 
         if mode == "top_products":
             return await self._run_top_products(params)
+        elif mode == "compare_periods":
+            return await self._run_compare_periods(params)
+        elif mode == "regional":
+            return await self._run_regional(params)
+        elif mode == "channel":
+            return await self._run_channel(params)
+        elif mode == "product_contribution":
+            return await self._run_product_contribution(params)
         else:
             return await self._run_trends(params)
 
@@ -276,3 +343,200 @@ class SalesAgent(BaseAgent):
             insights=insights,
             recommendations=recommendations,
         )
+
+    async def _run_compare_periods(self, params: dict[str, Any]) -> AgentResult:
+        """Compare sales between two periods."""
+        current_days = params.get("current_days", 1)
+        previous_days = params.get("previous_days", 7)
+
+        try:
+            resp = await self.tools.sales.compare_sales_periods(
+                CompareSalesPeriodsRequest(
+                    current_days=current_days,
+                    previous_days=previous_days,
+                )
+            )
+        except Exception as exc:
+            logger.exception("sales agent (compare_periods) failed: %s", exc)
+            return self.failure(exc)
+
+        findings: dict[str, Any] = {
+            "current_period": {
+                "days": current_days,
+                "revenue": resp.current_revenue,
+                "orders": resp.current_orders,
+            },
+            "previous_period": {
+                "days": previous_days,
+                "revenue": resp.previous_revenue,
+                "orders": resp.previous_orders,
+            },
+            "changes": {
+                "revenue_change_pct": resp.revenue_change_pct,
+                "order_change_pct": resp.order_change_pct,
+                "avg_order_value_change_pct": resp.avg_order_value_change_pct,
+            },
+            "trend": resp.trend,
+        }
+        insights: list[str] = []
+        recommendations: list[AgentRecommendation] = []
+
+        insights.append(f"Comparing last {current_days} day(s) to previous {previous_days} days:")
+        insights.append(f"  Current revenue: ${resp.current_revenue:,.2f}")
+        insights.append(
+            f"  Previous avg daily: ${resp.previous_revenue / previous_days if previous_days > 0 else 0:,.2f}"
+        )
+        insights.append(f"  Revenue change: {resp.revenue_change_pct:+.1f}%")
+        insights.append(f"  Order change: {resp.order_change_pct:+.1f}%")
+        insights.append(f"  Trend: {resp.trend}")
+
+        if resp.revenue_change_pct < -15:
+            insights.append(
+                f"⚠️ ALERT: Significant revenue decline of {resp.revenue_change_pct:.1f}%"
+            )
+            recommendations.append(
+                AgentRecommendation(
+                    action_type="investigate_decline",
+                    payload={"decline_pct": resp.revenue_change_pct},
+                    reasoning="Revenue decline exceeds 15% threshold",
+                    requires_approval=False,
+                )
+            )
+        elif resp.revenue_change_pct > 15:
+            insights.append(
+                f"📈 Strong growth: Revenue increased by {resp.revenue_change_pct:.1f}%"
+            )
+
+        return self.success(findings=findings, insights=insights, recommendations=recommendations)
+
+    async def _run_regional(self, params: dict[str, Any]) -> AgentResult:
+        """Analyze sales by region."""
+        window_days = params.get("window_days", 7)
+        compare_to_avg = params.get("compare_to_avg", True)
+
+        try:
+            resp = await self.tools.sales.get_regional_sales(
+                GetRegionalSalesRequest(
+                    window_days=window_days,
+                    compare_to_avg=compare_to_avg,
+                )
+            )
+        except Exception as exc:
+            logger.exception("sales agent (regional) failed: %s", exc)
+            return self.failure(exc)
+
+        findings: dict[str, Any] = {
+            "window_days": window_days,
+            "regions": [r.model_dump() for r in resp.regions],
+            "underperforming_regions": [r.model_dump() for r in resp.underperforming_regions],
+            "top_region": resp.top_region,
+            "worst_region": resp.worst_region,
+        }
+        insights: list[str] = []
+        recommendations: list[AgentRecommendation] = []
+
+        insights.append(f"Regional sales analysis for the last {window_days} days:")
+
+        for region in resp.regions:
+            trend_icon = "📈" if region.change_pct > 0 else "📉" if region.change_pct < 0 else "➡️"
+            insights.append(
+                f"  {trend_icon} {region.region}: ${region.revenue:,.2f} ({region.change_pct:+.1f}% vs avg)"
+            )
+
+        if resp.underperforming_regions:
+            insights.append(f"⚠️ Underperforming regions: {len(resp.underperforming_regions)}")
+            for r in resp.underperforming_regions:
+                insights.append(f"    - {r.region}: {r.change_pct:.1f}% below average")
+
+        if resp.top_region:
+            insights.append(f"🏆 Top performing region: {resp.top_region}")
+        if resp.worst_region:
+            insights.append(f"⚠️ Worst performing region: {resp.worst_region}")
+
+        return self.success(findings=findings, insights=insights, recommendations=recommendations)
+
+    async def _run_channel(self, params: dict[str, Any]) -> AgentResult:
+        """Analyze sales by channel."""
+        window_days = params.get("window_days", 7)
+
+        try:
+            resp = await self.tools.sales.get_channel_performance(
+                GetChannelPerformanceRequest(window_days=window_days)
+            )
+        except Exception as exc:
+            logger.exception("sales agent (channel) failed: %s", exc)
+            return self.failure(exc)
+
+        findings: dict[str, Any] = {
+            "window_days": window_days,
+            "channels": [c.model_dump() for c in resp.channels],
+            "top_channel": resp.top_channel,
+            "worst_channel": resp.worst_channel,
+            "total_revenue": resp.total_revenue,
+        }
+        insights: list[str] = []
+
+        insights.append(f"Channel performance for the last {window_days} days:")
+        insights.append(f"Total revenue: ${resp.total_revenue:,.2f}")
+
+        for channel in resp.channels:
+            insights.append(
+                f"  - {channel.channel}: ${channel.revenue:,.2f} "
+                f"({channel.revenue_share:.1f}% of total), {channel.orders} orders"
+            )
+
+        if resp.top_channel:
+            insights.append(f"🏆 Best channel: {resp.top_channel}")
+        if resp.worst_channel:
+            insights.append(f"⚠️ Worst channel: {resp.worst_channel}")
+
+        return self.success(findings=findings, insights=insights)
+
+    async def _run_product_contribution(self, params: dict[str, Any]) -> AgentResult:
+        """Identify products contributing to revenue changes."""
+        current_days = params.get("current_days", 1)
+        previous_days = params.get("previous_days", 7)
+        limit = params.get("limit", 10)
+
+        try:
+            resp = await self.tools.sales.get_product_contribution(
+                GetProductContributionRequest(
+                    current_days=current_days,
+                    previous_days=previous_days,
+                    limit=limit,
+                )
+            )
+        except Exception as exc:
+            logger.exception("sales agent (product_contribution) failed: %s", exc)
+            return self.failure(exc)
+
+        findings: dict[str, Any] = {
+            "current_days": current_days,
+            "previous_days": previous_days,
+            "products": [p.model_dump() for p in resp.products],
+            "biggest_gainers": [p.model_dump() for p in resp.biggest_gainers],
+            "biggest_losers": [p.model_dump() for p in resp.biggest_losers],
+            "overall_change_pct": resp.overall_change_pct,
+        }
+        insights: list[str] = []
+
+        insights.append(
+            f"Product revenue contribution (last {current_days} day(s) vs {previous_days} days):"
+        )
+        insights.append(f"Overall revenue change: {resp.overall_change_pct:+.1f}%")
+
+        if resp.biggest_losers:
+            insights.append("📉 Products with biggest revenue drops:")
+            for p in resp.biggest_losers[:5]:
+                insights.append(
+                    f"  - {p.name}: {p.change_pct:+.1f}% (${p.current_revenue:,.2f} vs avg ${p.previous_avg_revenue:,.2f})"
+                )
+
+        if resp.biggest_gainers:
+            insights.append("📈 Products with biggest revenue gains:")
+            for p in resp.biggest_gainers[:5]:
+                insights.append(
+                    f"  - {p.name}: {p.change_pct:+.1f}% (${p.current_revenue:,.2f} vs avg ${p.previous_avg_revenue:,.2f})"
+                )
+
+        return self.success(findings=findings, insights=insights)
