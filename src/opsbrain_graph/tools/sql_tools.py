@@ -90,8 +90,8 @@ class GetRegionalSalesRequest(BaseModel):
 class RegionalSales(BaseModel):
     region: str
     revenue: float
-    orders: int
-    avg_revenue: float = 0
+    order_count: int
+    revenue_share_pct: float = 0
     change_pct: float = 0
 
 

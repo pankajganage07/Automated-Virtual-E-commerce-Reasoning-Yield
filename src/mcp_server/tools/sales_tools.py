@@ -127,14 +127,14 @@ class CompareSalesPeriodsTool(BaseTool):
         # Get current period metrics
         current_stmt = text(
             """
-            SELECT
-                COALESCE(SUM(revenue), 0) AS revenue,
-                COALESCE(SUM(qty), 0) AS units,
-                COUNT(*) AS order_count,
-                COALESCE(AVG(revenue), 0) AS avg_order_value
-            FROM orders
-            WHERE timestamp >= NOW() - INTERVAL :current_days || ' days'
-        """
+    SELECT
+        COALESCE(SUM(revenue), 0) AS revenue,
+        COALESCE(SUM(qty), 0) AS units,
+        COUNT(*) AS order_count,
+        COALESCE(AVG(revenue), 0) AS avg_order_value
+    FROM orders
+    WHERE timestamp >= NOW() - (:current_days * INTERVAL '1 day')
+"""
         )
         current_result = await session.execute(current_stmt, {"current_days": payload.current_days})
         current = current_result.one()
@@ -142,15 +142,15 @@ class CompareSalesPeriodsTool(BaseTool):
         # Get comparison period metrics (previous period of same length for fair comparison)
         comparison_stmt = text(
             """
-            SELECT
-                COALESCE(SUM(revenue), 0) / NULLIF(:comparison_days, 0) AS daily_avg_revenue,
-                COALESCE(SUM(qty), 0) / NULLIF(:comparison_days, 0) AS daily_avg_units,
-                COUNT(*) / NULLIF(:comparison_days, 0) AS daily_avg_orders,
-                COALESCE(AVG(revenue), 0) AS avg_order_value
-            FROM orders
-            WHERE timestamp >= NOW() - INTERVAL :offset_days || ' days'
-              AND timestamp < NOW() - INTERVAL :current_days || ' days'
-        """
+    SELECT
+        COALESCE(SUM(revenue), 0) / NULLIF(:comparison_days, 0) AS daily_avg_revenue,
+        COALESCE(SUM(qty), 0) / NULLIF(:comparison_days, 0) AS daily_avg_units,
+        COUNT(*) / NULLIF(:comparison_days, 0) AS daily_avg_orders,
+        COALESCE(AVG(revenue), 0) AS avg_order_value
+    FROM orders
+    WHERE timestamp >= NOW() - (:offset_days * INTERVAL '1 day')
+      AND timestamp < NOW() - (:current_days * INTERVAL '1 day')
+"""
         )
         comparison_result = await session.execute(
             comparison_stmt,
@@ -247,16 +247,16 @@ class GetRegionalSalesTool(BaseTool):
         # Current period by region
         current_stmt = text(
             """
-            SELECT
-                region,
-                COALESCE(SUM(revenue), 0) AS revenue,
-                COALESCE(SUM(qty), 0) AS units,
-                COUNT(*) AS order_count
-            FROM orders
-            WHERE timestamp >= NOW() - INTERVAL :window_days || ' days'
-            GROUP BY region
-            ORDER BY revenue DESC
-        """
+    SELECT
+        region,
+        COALESCE(SUM(revenue), 0) AS revenue,
+        COALESCE(SUM(qty), 0) AS units,
+        COUNT(*) AS order_count
+    FROM orders
+    WHERE timestamp >= NOW() - (:window_days * INTERVAL '1 day')
+    GROUP BY region
+    ORDER BY revenue DESC
+"""
         )
         current_result = await session.execute(current_stmt, {"window_days": payload.window_days})
         current_rows = list(current_result)
@@ -266,15 +266,15 @@ class GetRegionalSalesTool(BaseTool):
         if payload.compare_to_previous:
             prev_stmt = text(
                 """
-                SELECT
-                    region,
-                    COALESCE(SUM(revenue), 0) AS revenue,
-                    COALESCE(SUM(qty), 0) AS units
-                FROM orders
-                WHERE timestamp >= NOW() - INTERVAL :offset_days || ' days'
-                  AND timestamp < NOW() - INTERVAL :window_days || ' days'
-                GROUP BY region
-            """
+    SELECT
+        region,
+        COALESCE(SUM(revenue), 0) AS revenue,
+        COALESCE(SUM(qty), 0) AS units
+    FROM orders
+    WHERE timestamp >= NOW() - (:offset_days * INTERVAL '1 day')
+      AND timestamp < NOW() - (:window_days * INTERVAL '1 day')
+    GROUP BY region
+"""
             )
             prev_result = await session.execute(
                 prev_stmt,
@@ -440,41 +440,41 @@ class GetProductContributionTool(BaseTool):
         # Get product performance for both periods
         stmt = text(
             """
-            WITH current_period AS (
-                SELECT
-                    p.id,
-                    p.name,
-                    COALESCE(SUM(o.revenue), 0) AS revenue,
-                    COALESCE(SUM(o.qty), 0) AS units
-                FROM products p
-                LEFT JOIN orders o ON o.product_id = p.id
-                    AND o.timestamp >= NOW() - INTERVAL :current_days || ' days'
-                GROUP BY p.id, p.name
-            ),
-            comparison_period AS (
-                SELECT
-                    p.id,
-                    COALESCE(SUM(o.revenue), 0) / NULLIF(:comparison_days, 0) * :current_days AS expected_revenue,
-                    COALESCE(SUM(o.qty), 0) / NULLIF(:comparison_days, 0) * :current_days AS expected_units
-                FROM products p
-                LEFT JOIN orders o ON o.product_id = p.id
-                    AND o.timestamp >= NOW() - INTERVAL :offset_days || ' days'
-                    AND o.timestamp < NOW() - INTERVAL :current_days || ' days'
-                GROUP BY p.id
-            )
-            SELECT
-                c.id,
-                c.name,
-                c.revenue AS actual_revenue,
-                c.units AS actual_units,
-                COALESCE(cp.expected_revenue, 0) AS expected_revenue,
-                COALESCE(cp.expected_units, 0) AS expected_units,
-                c.revenue - COALESCE(cp.expected_revenue, 0) AS revenue_impact
-            FROM current_period c
-            LEFT JOIN comparison_period cp ON cp.id = c.id
-            ORDER BY revenue_impact ASC
-            LIMIT :limit
-        """
+    WITH current_period AS (
+        SELECT
+            p.id,
+            p.name,
+            COALESCE(SUM(o.revenue), 0) AS revenue,
+            COALESCE(SUM(o.qty), 0) AS units
+        FROM products p
+        LEFT JOIN orders o ON o.product_id = p.id
+            AND o.timestamp >= NOW() - (:current_days * INTERVAL '1 day')
+        GROUP BY p.id, p.name
+    ),
+    comparison_period AS (
+        SELECT
+            p.id,
+            COALESCE(SUM(o.revenue), 0) / NULLIF(:comparison_days, 0) * :current_days AS expected_revenue,
+            COALESCE(SUM(o.qty), 0) / NULLIF(:comparison_days, 0) * :current_days AS expected_units
+        FROM products p
+        LEFT JOIN orders o ON o.product_id = p.id
+            AND o.timestamp >= NOW() - (:offset_days * INTERVAL '1 day')
+            AND o.timestamp < NOW() - (:current_days * INTERVAL '1 day')
+        GROUP BY p.id
+    )
+    SELECT
+        c.id,
+        c.name,
+        c.revenue AS actual_revenue,
+        c.units AS actual_units,
+        COALESCE(cp.expected_revenue, 0) AS expected_revenue,
+        COALESCE(cp.expected_units, 0) AS expected_units,
+        c.revenue - COALESCE(cp.expected_revenue, 0) AS revenue_impact
+    FROM current_period c
+    LEFT JOIN comparison_period cp ON cp.id = c.id
+    ORDER BY revenue_impact ASC
+    LIMIT :limit
+"""
         )
         result = await session.execute(
             stmt,
