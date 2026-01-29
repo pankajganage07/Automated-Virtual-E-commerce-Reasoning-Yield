@@ -9,3 +9,53 @@ id,name,category,price,stock_qty,low_stock_threshold
 8,SmartThermo Controller,Electronics,79.99,12,10
 9,YogaBlock Pro,Fitness,19.99,100,25
 10,EcoPlate Set,Home & Kitchen,44.99,3,10
+11,BrewMaster French Press,Home & Kitchen,54.99,40,12
+12,SleepCloud Pillow,Home & Kitchen,39.99,75,20
+13,PulseTrack Fitness Band,Electronics,59.99,90,25
+14,BreezeMax Desk Fan,Home & Kitchen,69.99,30,10
+15,SolarGlow Garden Lights,Outdoor,34.99,110,30
+16,PureMist Humidifier,Home & Kitchen,89.99,15,10
+17,GlidePro Mouse,Electronics,29.99,150,40
+18,ZenDen Diffuser,Home & Kitchen,24.99,200,50
+19,ChillPack Cooler,Outdoor,99.99,20,8
+20,SwiftCharge Power Bank,Electronics,44.99,300,60
+21,ActiveCore Resistance Bands,Fitness,24.99,140,35
+22,RapidBrew Kettle,Home & Kitchen,59.99,55,15
+23,SteadyStep Balance Board,Fitness,69.99,18,10
+24,Lumina Desk Lamp,Electronics,49.99,90,25
+25,ComfyStride Slippers,Home & Kitchen,29.99,210,40
+26,PureSip Glass Set,Home & Kitchen,34.99,60,15
+27,AeroPod Earbuds,Electronics,99.99,45,15
+28,Trailblaze Backpack,Outdoor,119.99,35,12
+29,CozyHeat Throw,Home & Kitchen,69.99,70,20
+30,ChefMaster Skillet,Home & Kitchen,79.99,25,10
+31,FlexFoam Roller,Fitness,34.99,85,25
+32,SparkleClean Robot Vacuum,Home & Kitchen,249.99,10,5
+33,HushTone Ear Plugs,Beauty,14.99,500,100
+34,FreshStart Juicer,Home & Kitchen,129.99,22,10
+35,CloudLite Notebook,Office,19.99,400,80
+36,PulseBeat Heart Monitor,Fitness,149.99,12,5
+37,ArcticFlow Water Cooler,Home & Kitchen,199.99,8,3
+38,GlowUp Vanity Mirror,Beauty,59.99,65,15
+39,SnapStack Storage Bins,Home & Kitchen,49.99,160,40
+40,BreezeLite Air Conditioner,Home & Kitchen,399.99,6,2
+41,TravelLite Suitcase,Outdoor,149.99,18,5
+42,PureWave Sonic Toothbrush,Beauty,89.99,70,20
+43,AeroDesk Standing Desk,Office,299.99,14,4
+44,CalmNest Weighted Blanket,Home & Kitchen,129.99,33,8
+45,SparkCharge Wall Plug,Electronics,24.99,220,50
+46,RapidNote Smart Pen,Office,79.99,60,15
+47,FreshBake Bread Maker,Home & Kitchen,159.99,16,6
+48,ChillWave Ice Maker,Home & Kitchen,229.99,9,4
+49,SwiftSteam Iron,Home & Kitchen,69.99,55,15
+50,FitPulse Jump Rope,Fitness,19.99,130,30
+51,GreenLeaf Herb Kit,Home & Kitchen,34.99,75,20
+52,NovaGlow Night Light,Electronics,17.99,240,60
+53,SummitPro Hiking Poles,Outdoor,89.99,40,10
+54,EverCharge Extension Cord,Electronics,29.99,310,80
+55,AquaPulse Swim Goggles,Outdoor,24.99,95,25
+56,StudioTone Bluetooth Speaker,Electronics,119.99,48,15
+57,QuickPrep Blender,Home & Kitchen,99.99,27,8
+58,CoreFlex Ab Roller,Fitness,44.99,62,15
+59,GlowMist Facial Steamer,Beauty,74.99,80,20
+60,PureBrew Cold Brew Maker,Home & Kitchen,59.99,50,12

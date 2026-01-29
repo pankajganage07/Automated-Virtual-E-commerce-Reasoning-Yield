@@ -16,7 +16,7 @@ from typing import Any
 from sqlalchemy import delete, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Campaign, Order, Product, SupportTicket, AgentMemory, PendingAction
+from db.models import Campaign, Order, Product, SupportTicket, Inventory, AgentMemory, PendingAction
 from db.session import async_session_factory
 
 # Path to fixtures directory
@@ -47,6 +47,7 @@ async def seed(clear_only: bool = False) -> None:
         await _seed_products(session)
         await session.commit()  # Commit products first for FK constraints
 
+        await _seed_inventory(session)
         await _seed_campaigns(session)
         await _seed_orders(session)
         await _seed_support_tickets(session)
@@ -62,7 +63,7 @@ async def seed(clear_only: bool = False) -> None:
 
 async def _clear_tables(session: AsyncSession) -> None:
     """Clear all tables in correct order (respecting FK constraints)."""
-    tables = [PendingAction, AgentMemory, SupportTicket, Order, Campaign, Product]
+    tables = [PendingAction, AgentMemory, SupportTicket, Order, Inventory, Campaign, Product]
     for model in tables:
         await session.execute(delete(model))
     await session.commit()
@@ -159,10 +160,34 @@ async def _seed_support_tickets(session: AsyncSession) -> None:
     print(f"🎫 Loaded {len(tickets)} support tickets.")
 
 
+async def _seed_inventory(session: AsyncSession) -> None:
+    rows = load_csv("inventory.csv")
+    if not rows:
+        return
+
+    now = dt.datetime.now(dt.timezone.utc)
+    items = [
+        Inventory(
+            id=int(row["id"]),
+            product_id=int(row["product_id"]),
+            warehouse_code=row["warehouse_code"],
+            on_hand=int(row["on_hand"]),
+            reserved=int(row["reserved"]),
+            reorder_point=int(row["reorder_point"]),
+            incoming_qty=int(row["incoming_qty"]),
+            last_restocked=now - dt.timedelta(days=int(row["last_restock_days_ago"])),
+        )
+        for row in rows
+    ]
+    session.add_all(items)
+    print(f"📦 Loaded {len(items)} inventory records.")
+
+
 async def _reset_sequences(session: AsyncSession) -> None:
     """Reset PostgreSQL sequences to max ID + 1 for each table."""
     sequences = [
         ("products", "products_id_seq"),
+        ("inventory", "inventory_id_seq"),
         ("campaigns", "campaigns_id_seq"),
         ("orders", "orders_id_seq"),
         ("support_tickets", "support_tickets_id_seq"),
@@ -181,6 +206,7 @@ async def _print_summary(session: AsyncSession) -> None:
     counts = {}
     for model, name in [
         (Product, "Products"),
+        (Inventory, "Inventory Records"),
         (Campaign, "Campaigns"),
         (Order, "Orders"),
         (SupportTicket, "Support Tickets"),

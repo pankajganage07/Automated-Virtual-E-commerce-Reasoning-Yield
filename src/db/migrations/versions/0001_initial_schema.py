@@ -30,6 +30,25 @@ def upgrade() -> None:
     )
 
     op.create_table(
+        "inventory",
+        sa.Column("id", sa.Integer, primary_key=True),
+        sa.Column(
+            "product_id",
+            sa.Integer,
+            sa.ForeignKey("products.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("warehouse_code", sa.String(length=50), nullable=False),
+        sa.Column("on_hand", sa.Integer, nullable=False, server_default="0"),
+        sa.Column("reserved", sa.Integer, nullable=False, server_default="0"),
+        sa.Column("reorder_point", sa.Integer, nullable=False, server_default="0"),
+        sa.Column("incoming_qty", sa.Integer, nullable=False, server_default="0"),
+        sa.Column("last_restocked", sa.DateTime(timezone=True), nullable=False),
+        sa.UniqueConstraint("product_id", "warehouse_code", name="uq_inventory_product_warehouse"),
+        sa.Index("idx_inventory_product_id", "product_id"),
+    )
+
+    op.create_table(
         "campaigns",
         sa.Column("id", sa.Integer, primary_key=True),
         sa.Column("name", sa.String(length=255), nullable=False, unique=True),
@@ -103,5 +122,8 @@ def downgrade() -> None:
     op.drop_table("support_tickets")
     op.drop_table("orders")
     op.drop_table("campaigns")
+    op.drop_index("idx_inventory_product_id", table_name="inventory")
+    op.drop_constraint("uq_inventory_product_warehouse", "inventory", type_="unique")
+    op.drop_table("inventory")
     op.drop_table("products")
     op.execute('DROP EXTENSION IF EXISTS "vector";')
