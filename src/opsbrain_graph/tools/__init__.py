@@ -1,43 +1,39 @@
+"""
+LangGraph Agent Tools - Slimmed Architecture.
+
+Each domain has 2 core tools. Complex queries route to DataAnalystAgent with HITL.
+"""
+
 from .registry import ToolRegistry
+
+# SQL tools (for approved custom queries via HITL)
 from .sql_tools import (
     SQLToolset,
     ExecuteSQLRequest,
     ExecuteSQLResponse,
+    # Sales tools (2 core)
     SalesToolset,
+    GetSalesSummaryRequest,
+    SalesSummaryResponse,
     GetTopProductsRequest,
     GetTopProductsResponse,
     TopProduct,
-    GetSalesSummaryRequest,
-    SalesSummaryResponse,
-    CompareSalesPeriodsRequest,
-    CompareSalesPeriodsResponse,
-    GetRegionalSalesRequest,
-    GetRegionalSalesResponse,
-    RegionalSales,
-    GetChannelPerformanceRequest,
-    GetChannelPerformanceResponse,
-    ChannelSales,
-    GetProductContributionRequest,
-    GetProductContributionResponse,
-    ProductContribution,
 )
+
+# Inventory tools (2 core)
 from .inventory_tools import (
     InventoryToolset,
     GetInventoryStatusRequest,
     GetInventoryStatusResponse,
-    PredictStockOutRequest,
-    PredictStockOutResponse,
-    RestockItemRequest,
-    RestockItemResponse,
-    UpdateInventoryRequest,
-    UpdateInventoryResponse,
     GetLowStockProductsRequest,
     GetLowStockProductsResponse,
     LowStockProduct,
-    CheckTopSellersStockRequest,
-    CheckTopSellersStockResponse,
-    TopSellerStock,
+    # Action tools (for HITL)
+    UpdateInventoryRequest,
+    UpdateInventoryResponse,
 )
+
+# Marketing tools (2 core)
 from .marketing_tools import (
     MarketingToolset,
     GetCampaignSpendRequest,
@@ -45,19 +41,16 @@ from .marketing_tools import (
     CalculateROASRequest,
     CalculateROASResponse,
     CampaignROASInfo,
+    # Action tools (for HITL)
     PauseCampaignRequest,
     PauseCampaignResponse,
     ResumeCampaignRequest,
     ResumeCampaignResponse,
     AdjustBudgetRequest,
     AdjustBudgetResponse,
-    GetUnderperformingCampaignsRequest,
-    GetUnderperformingCampaignsResponse,
-    UnderperformingCampaign,
-    CompareCampaignPerformanceRequest,
-    CompareCampaignPerformanceResponse,
-    CampaignPerformanceComparison,
 )
+
+# Support tools (2 core)
 from .support_tools import (
     SupportToolset,
     GetSupportSentimentRequest,
@@ -65,19 +58,16 @@ from .support_tools import (
     GetTicketTrendsRequest,
     GetTicketTrendsResponse,
     TicketTrend,
+    # Action tools (for HITL)
     EscalateTicketRequest,
     EscalateTicketResponse,
     CloseTicketRequest,
     CloseTicketResponse,
     PrioritizeTicketRequest,
     PrioritizeTicketResponse,
-    GetCommonIssuesRequest,
-    GetCommonIssuesResponse,
-    CommonIssue,
-    GetComplaintTrendsRequest,
-    GetComplaintTrendsResponse,
-    ComplaintCategoryTrend,
 )
+
+# Memory tools
 from .memory_tools import (
     MemoryToolset,
     QueryVectorMemoryRequest,
@@ -96,17 +86,23 @@ __all__ = [
     "SQLToolset",
     "ExecuteSQLRequest",
     "ExecuteSQLResponse",
-    # Inventory tools
+    # Sales tools (2 core)
+    "SalesToolset",
+    "GetSalesSummaryRequest",
+    "SalesSummaryResponse",
+    "GetTopProductsRequest",
+    "GetTopProductsResponse",
+    "TopProduct",
+    # Inventory tools (2 core)
     "InventoryToolset",
     "GetInventoryStatusRequest",
     "GetInventoryStatusResponse",
-    "PredictStockOutRequest",
-    "PredictStockOutResponse",
-    "RestockItemRequest",
-    "RestockItemResponse",
+    "GetLowStockProductsRequest",
+    "GetLowStockProductsResponse",
+    "LowStockProduct",
     "UpdateInventoryRequest",
     "UpdateInventoryResponse",
-    # Marketing tools
+    # Marketing tools (2 core)
     "MarketingToolset",
     "GetCampaignSpendRequest",
     "GetCampaignSpendResponse",
@@ -119,7 +115,7 @@ __all__ = [
     "ResumeCampaignResponse",
     "AdjustBudgetRequest",
     "AdjustBudgetResponse",
-    # Support tools
+    # Support tools (2 core)
     "SupportToolset",
     "GetSupportSentimentRequest",
     "GetSupportSentimentResponse",
@@ -142,43 +138,4 @@ __all__ = [
     "ListIncidentsRequest",
     "ListIncidentsResponse",
     "IncidentRecord",
-    # Sales tools (from sql_tools)
-    "SalesToolset",
-    "GetTopProductsRequest",
-    "GetTopProductsResponse",
-    "TopProduct",
-    "GetSalesSummaryRequest",
-    "SalesSummaryResponse",
-    "CompareSalesPeriodsRequest",
-    "CompareSalesPeriodsResponse",
-    "GetRegionalSalesRequest",
-    "GetRegionalSalesResponse",
-    "RegionalSales",
-    "GetChannelPerformanceRequest",
-    "GetChannelPerformanceResponse",
-    "ChannelSales",
-    "GetProductContributionRequest",
-    "GetProductContributionResponse",
-    "ProductContribution",
-    # Inventory additional tools
-    "GetLowStockProductsRequest",
-    "GetLowStockProductsResponse",
-    "LowStockProduct",
-    "CheckTopSellersStockRequest",
-    "CheckTopSellersStockResponse",
-    "TopSellerStock",
-    # Marketing additional tools
-    "GetUnderperformingCampaignsRequest",
-    "GetUnderperformingCampaignsResponse",
-    "UnderperformingCampaign",
-    "CompareCampaignPerformanceRequest",
-    "CompareCampaignPerformanceResponse",
-    "CampaignPerformanceComparison",
-    # Support additional tools
-    "GetCommonIssuesRequest",
-    "GetCommonIssuesResponse",
-    "CommonIssue",
-    "GetComplaintTrendsRequest",
-    "GetComplaintTrendsResponse",
-    "ComplaintCategoryTrend",
 ]

@@ -1,3 +1,13 @@
+"""
+Inventory tools for LangGraph agents.
+
+Slimmed toolset (2 core tools):
+1. get_inventory_status - Get stock levels for products
+2. get_low_stock_products - Find products below threshold
+
+Complex queries should route to DataAnalystAgent with HITL.
+"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -8,66 +18,71 @@ from .exceptions import MCPError
 from .mcp_client import MCPClient
 
 
+# =============================================================================
+# GET INVENTORY STATUS (Core Tool #1)
+# =============================================================================
+
+
 class GetInventoryStatusRequest(BaseModel):
-    product_ids: list[int] = Field(..., min_length=1)
+    product_ids: list[int] | None = Field(
+        default=None, description="Product IDs to check (optional)"
+    )
+    limit: int = Field(default=50, ge=1, le=200)
 
 
 class InventoryItem(BaseModel):
-    id: int
+    product_id: int
     name: str
+    category: str | None = None
     stock_qty: int
     low_stock_threshold: int
+    status: str  # out_of_stock, low_stock, in_stock
 
 
 class GetInventoryStatusResponse(BaseModel):
-    items: list[InventoryItem]
+    items: list[InventoryItem] = Field(default_factory=list)
+    total_count: int = 0
+    out_of_stock_count: int = 0
+    low_stock_count: int = 0
 
 
-class PredictStockOutRequest(BaseModel):
-    product_id: int = Field(..., description="Product ID to analyze")
-    lookahead_days: int = Field(default=7, ge=1, le=30, description="Days to look ahead")
+# =============================================================================
+# GET LOW STOCK PRODUCTS (Core Tool #2)
+# =============================================================================
 
 
-class PredictStockOutResponse(BaseModel):
-    """Response from stock-out prediction."""
+class GetLowStockProductsRequest(BaseModel):
+    include_out_of_stock: bool = Field(default=True)
+    category: str | None = Field(default=None, description="Optional category filter")
+    limit: int = Field(default=20, ge=1, le=100)
 
+
+class LowStockProduct(BaseModel):
     product_id: int
-    product_name: str | None = None
-    current_stock: int | None = None
-    low_stock_threshold: int | None = None
-    avg_daily_sales: float | None = None
-    days_until_stockout: float | None = None
-    projected_stockout_date: str | None = None
-    within_lookahead_window: bool | None = None
-    confidence: float | None = None
-    risk_level: str | None = None  # critical, high, medium, low, unknown
-    message: str | None = None
-    error: str | None = None
+    name: str
+    category: str | None = None
+    stock_qty: int
+    low_stock_threshold: int
+    buffer: int
+    status: str  # out_of_stock, critical, warning
+    needs_restock: bool = True
 
 
-class RestockItemRequest(BaseModel):
-    """Request to restock a product (HITL action)."""
+class GetLowStockProductsResponse(BaseModel):
+    low_stock_products: list[LowStockProduct] = Field(default_factory=list)
+    total_count: int = 0
+    out_of_stock_count: int = 0
+    critical_count: int = 0
+    has_critical: bool = False
 
-    product_id: int = Field(..., description="Product ID to restock")
-    quantity: int = Field(..., gt=0, description="Quantity to add to stock")
-    reason: str | None = Field(None, description="Reason for restocking")
 
-
-class RestockItemResponse(BaseModel):
-    """Response from restock operation."""
-
-    success: bool
-    product_id: int
-    product_name: str | None = None
-    old_quantity: int | None = None
-    new_quantity: int | None = None
-    change: int | None = None
-    reason: str | None = None
-    error: str | None = None
+# =============================================================================
+# ACTION TOOLS (for HITL execution)
+# =============================================================================
 
 
 class UpdateInventoryRequest(BaseModel):
-    """Request to update inventory (generic HITL action)."""
+    """Request to update inventory (HITL action)."""
 
     product_id: int = Field(..., description="Product ID to update")
     quantity_change: int = Field(..., description="Amount to add (positive) or remove (negative)")
@@ -87,106 +102,42 @@ class UpdateInventoryResponse(BaseModel):
     error: str | None = None
 
 
-# New request/response models for additional inventory tools
-class GetLowStockProductsRequest(BaseModel):
-    include_out_of_stock: bool = Field(default=True)
-    limit: int = Field(default=20, ge=1, le=100)
-
-
-class LowStockProduct(BaseModel):
-    product_id: int
-    name: str
-    category: str | None = None
-    stock_qty: int
-    low_stock_threshold: int
-    buffer: int
-    status: str
-    needs_restock: bool = True
-
-
-class GetLowStockProductsResponse(BaseModel):
-    low_stock_products: list[LowStockProduct] = Field(default_factory=list)
-    total_count: int = 0
-    out_of_stock_count: int = 0
-    critical_count: int = 0
-    has_critical: bool = False
-
-
-class CheckTopSellersStockRequest(BaseModel):
-    window_days: int = Field(default=7, ge=1, le=30)
-    top_n: int = Field(default=10, ge=1, le=50)
-
-
-class TopSellerStock(BaseModel):
-    product_id: int
-    name: str
-    revenue: float
-    units_sold: int
-    stock_qty: int
-    low_stock_threshold: int
-    stock_status: str
-
-
-class CheckTopSellersStockResponse(BaseModel):
-    window_days: int = 7
-    top_sellers: list[TopSellerStock] = Field(default_factory=list)
-    out_of_stock_top_sellers: list[TopSellerStock] = Field(default_factory=list)
-    low_stock_top_sellers: list[TopSellerStock] = Field(default_factory=list)
-    has_stock_issues: bool = False
-    potential_revenue_at_risk: float = 0
+# =============================================================================
+# INVENTORY TOOLSET
+# =============================================================================
 
 
 class InventoryToolset:
+    """
+    Inventory tools (2 core tools).
+
+    For complex queries (stock predictions, top seller stock checks),
+    the agent should indicate it cannot handle the query, and the supervisor
+    will route to the DataAnalystAgent.
+    """
+
     def __init__(self, client: MCPClient) -> None:
         self._client = client
 
     async def get_inventory_status(
         self, payload: GetInventoryStatusRequest
     ) -> GetInventoryStatusResponse:
+        """Get stock levels for products."""
         result = await self._client.invoke("get_inventory_status", payload.model_dump())
         try:
             return GetInventoryStatusResponse.model_validate(result)
         except ValidationError as exc:
             raise MCPError(f"Invalid response for get_inventory_status: {exc}") from exc
 
-    async def predict_stock_out(self, payload: PredictStockOutRequest) -> PredictStockOutResponse:
-        result = await self._client.invoke("predict_stock_out", payload.model_dump())
-        try:
-            return PredictStockOutResponse.model_validate(result)
-        except ValidationError as exc:
-            raise MCPError(f"Invalid response for predict_stock_out: {exc}") from exc
-
     async def get_low_stock_products(
         self, payload: GetLowStockProductsRequest
     ) -> GetLowStockProductsResponse:
+        """Find products below their stock threshold."""
         result = await self._client.invoke("get_low_stock_products", payload.model_dump())
         try:
             return GetLowStockProductsResponse.model_validate(result)
         except ValidationError as exc:
             raise MCPError(f"Invalid response for get_low_stock_products: {exc}") from exc
-
-    async def check_top_sellers_stock(
-        self, payload: CheckTopSellersStockRequest
-    ) -> CheckTopSellersStockResponse:
-        result = await self._client.invoke("check_top_sellers_stock", payload.model_dump())
-        try:
-            return CheckTopSellersStockResponse.model_validate(result)
-        except ValidationError as exc:
-            raise MCPError(f"Invalid response for check_top_sellers_stock: {exc}") from exc
-
-    async def restock_item(self, payload: RestockItemRequest) -> RestockItemResponse:
-        """Restock a product (HITL action - calls update_inventory MCP tool)."""
-        # Convert to update_inventory payload format
-        mcp_payload = {
-            "product_id": payload.product_id,
-            "quantity_change": payload.quantity,  # Positive for restocking
-            "reason": payload.reason or "Restock requested",
-        }
-        result = await self._client.invoke("update_inventory", mcp_payload)
-        try:
-            return RestockItemResponse.model_validate(result)
-        except ValidationError as exc:
-            raise MCPError(f"Invalid response for restock_item: {exc}") from exc
 
     async def update_inventory(self, payload: UpdateInventoryRequest) -> UpdateInventoryResponse:
         """Update product inventory (HITL action)."""

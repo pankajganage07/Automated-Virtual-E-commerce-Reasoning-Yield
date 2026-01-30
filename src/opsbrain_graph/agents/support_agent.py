@@ -1,13 +1,20 @@
+"""
+Support Agent - Slimmed architecture (2 core capabilities).
+
+Capabilities:
+1. sentiment_analysis - Get support sentiment metrics
+2. ticket_trends - Analyze ticket trends by category/product
+
+Complex queries (common issues, complaint comparison) route to DataAnalystAgent.
+"""
+
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from opsbrain_graph.tools import GetSupportSentimentRequest, GetTicketTrendsRequest
-from opsbrain_graph.tools.support_tools import (
-    GetCommonIssuesRequest,
-    GetComplaintTrendsRequest,
-)
 from .base_agent import (
     AgentCapability,
     AgentMetadata,
@@ -21,14 +28,41 @@ from .base_agent import (
 logger = logging.getLogger("agent.support")
 
 
+# Query patterns that this agent CANNOT handle (require DataAnalystAgent)
+COMPLEX_QUERY_PATTERNS = [
+    r"common.*issue",
+    r"frequent.*problem",
+    r"top.*complaint",
+    r"most.*reported",
+    r"compare.*complaint",
+    r"complaint.*increase",
+    r"complaint.*decrease",
+    r"yesterday.*vs.*week",
+    r"today.*vs.*last",
+    r"complaint.*trend.*comparison",
+    r"issue.*spike",
+    r"issue.*drop",
+    r"product.*support.*correlation",
+    r"support.*by.*region",
+    r"resolution.*time",
+    r"agent.*performance",
+]
+
+
 class SupportAgent(BaseAgent):
+    """
+    Support Agent with 2 core capabilities.
+
+    Complex queries trigger cannot_handle for routing to DataAnalystAgent.
+    """
+
     name = "support"
-    description = "Analyzes support sentiment and issue trends."
+    description = "Analyzes support sentiment and ticket trends."
 
     metadata = AgentMetadata(
         name="support",
         display_name="SUPPORT",
-        description="Analyzes customer support tickets, sentiment trends, issue patterns, and complaint volumes. Can identify common issues and complaint spikes.",
+        description="Analyzes support sentiment and ticket trends. For complex analytics (common issues, period comparison), use data analyst.",
         capabilities=[
             AgentCapability(
                 name="sentiment_analysis",
@@ -40,61 +74,21 @@ class SupportAgent(BaseAgent):
                 example_queries=[
                     "What's the customer sentiment like?",
                     "Are there many complaints?",
-                    "How are support tickets trending?",
+                    "How is support trending?",
                 ],
             ),
             AgentCapability(
-                name="issue_detection",
-                description="Detect spikes in specific issue categories",
+                name="ticket_trends",
+                description="Analyze ticket trends by category, product, or day",
                 parameters={
-                    "window_days": "Time period to analyze",
+                    "window_days": "Analysis window (default: 14)",
+                    "group_by": "Group by: issue_category, product, day",
                     "product_id": "Optional product filter",
                 },
                 example_queries=[
-                    "Are there any issue spikes?",
-                    "What are customers complaining about?",
-                    "Show me support trends for product X",
-                ],
-            ),
-            AgentCapability(
-                name="common_issues",
-                description="Find the most common customer issues reported",
-                parameters={
-                    "window_days": "Time period to analyze (default: 7)",
-                    "min_count": "Minimum occurrences to be considered common (default: 2)",
-                    "limit": "Max issues to return (default: 10)",
-                },
-                example_queries=[
-                    "Is there a common issue reported by customers?",
-                    "What are customers complaining about most?",
-                    "Show me top customer issues",
-                ],
-            ),
-            AgentCapability(
-                name="complaint_trends",
-                description="Compare complaint volume between current and previous periods",
-                parameters={
-                    "current_days": "Current period in days (default: 1)",
-                    "previous_days": "Previous period for comparison (default: 7)",
-                    "issue_category": "Optional filter by issue category",
-                },
-                example_queries=[
-                    "Did customer complaints increase yesterday?",
-                    "Are complaints trending up or down?",
-                    "Compare today's tickets to last week",
-                ],
-            ),
-            AgentCapability(
-                name="ticket_escalation",
-                description="Recommend escalating or prioritizing tickets based on sentiment patterns",
-                parameters={
-                    "ticket_id": "Specific ticket ID to escalate",
-                    "priority": "New priority level (low, medium, high, critical)",
-                },
-                example_queries=[
-                    "Escalate urgent tickets",
-                    "Which tickets need immediate attention?",
-                    "Prioritize high-severity issues",
+                    "What are the ticket trends?",
+                    "Show me support volume by category",
+                    "Ticket breakdown by product",
                 ],
             ),
         ],
@@ -106,27 +100,46 @@ class SupportAgent(BaseAgent):
             "customer",
             "issue",
             "feedback",
-            "satisfaction",
-            "escalate",
-            "priority",
-            "common issue",
         ],
-        priority_boost=[
-            "angry customers",
-            "high complaints",
-            "negative sentiment",
-            "urgent ticket",
-        ],
+        priority_boost=["angry customers", "high complaints", "negative sentiment"],
     )
+
+    def _is_complex_query(self, query: str) -> bool:
+        """Check if query requires complex analysis."""
+        query_lower = query.lower()
+        for pattern in COMPLEX_QUERY_PATTERNS:
+            if re.search(pattern, query_lower):
+                return True
+        return False
+
+    def _cannot_handle(self, query: str) -> AgentResult:
+        """Return cannot_handle status for supervisor to route to analyst."""
+        return AgentResult(
+            status="cannot_handle",
+            findings={
+                "query": query,
+                "reason": "This query requires complex support analysis (common issues, period comparison) that needs custom SQL.",
+                "suggested_agent": "data_analyst",
+            },
+            insights=[
+                "This support query requires advanced analytics beyond my core capabilities.",
+                "Routing to Data Analyst for custom SQL generation with HITL approval.",
+            ],
+            recommendations=[],
+        )
 
     async def run(self, task: AgentTask, context: AgentRunContext) -> AgentResult:
         params = task.parameters
+        query = params.get("query", "")
         mode = params.get("mode", "sentiment_analysis")
 
-        if mode == "common_issues":
-            return await self._run_common_issues(params)
-        elif mode == "complaint_trends":
-            return await self._run_complaint_trends(params)
+        # Check for complex queries first
+        if self._is_complex_query(query):
+            logger.info("support agent: complex query detected, returning cannot_handle")
+            return self._cannot_handle(query)
+
+        if mode == "ticket_trends":
+            return await self._run_ticket_trends(params)
         else:
             return await self._run_sentiment_analysis(params)
 
@@ -147,7 +160,7 @@ class SupportAgent(BaseAgent):
         recommendations: list[AgentRecommendation] = []
         stats = sentiment.sentiment
 
-        insights.append(f"Support sentiment analysis for the last {window_days} days:")
+        insights.append(f"Support sentiment analysis (last {window_days} days):")
         insights.append(f"  Total tickets: {stats.ticket_volume}")
         insights.append(f"  Average sentiment: {stats.avg_sentiment:.2f}")
         insights.append(f"  Negative ratio: {stats.negative_ratio:.0%}")
@@ -188,138 +201,47 @@ class SupportAgent(BaseAgent):
         findings = sentiment.model_dump()
         return self.success(findings=findings, insights=insights, recommendations=recommendations)
 
-    async def _run_common_issues(self, params: dict[str, Any]) -> AgentResult:
-        """Find common customer issues."""
-        window_days = params.get("window_days", 7)
-        min_count = params.get("min_count", 2)
-        limit = params.get("limit", 10)
+    async def _run_ticket_trends(self, params: dict[str, Any]) -> AgentResult:
+        """Analyze ticket trends."""
+        window_days = params.get("window_days", 14)
+        group_by = params.get("group_by", "issue_category")
+        product_id = params.get("product_id")
 
         try:
-            resp = await self.tools.support.get_common_issues(
-                GetCommonIssuesRequest(
+            resp = await self.tools.support.get_ticket_trends(
+                GetTicketTrendsRequest(
                     window_days=window_days,
-                    min_count=min_count,
-                    limit=limit,
+                    group_by=group_by,
+                    product_id=product_id,
                 )
             )
         except Exception as exc:
-            logger.exception("support agent (common_issues) failed: %s", exc)
+            logger.exception("support agent (ticket_trends) failed: %s", exc)
             return self.failure(exc)
 
-        findings: dict[str, Any] = {
-            "window_days": resp.window_days,
-            "common_issues": [i.model_dump() for i in resp.common_issues],
-            "most_common_issue": resp.most_common_issue,
-            "total_tickets_analyzed": resp.total_tickets_analyzed,
-            "has_critical_issues": resp.has_critical_issues,
-        }
-        insights: list[str] = []
-        recommendations: list[AgentRecommendation] = []
-
-        insights.append(f"Common issues analysis for the last {window_days} days:")
-        insights.append(f"  Total tickets analyzed: {resp.total_tickets_analyzed}")
-
-        if not resp.common_issues:
-            insights.append("✅ No common issues detected - complaints are diverse.")
-        else:
-            if resp.most_common_issue:
-                insights.append(f"📌 Most common issue: {resp.most_common_issue}")
-
-            for issue in resp.common_issues:
-                sentiment_icon = (
-                    "🔴"
-                    if issue.avg_sentiment < 0.3
-                    else "🟠" if issue.avg_sentiment < 0.5 else "🟢"
-                )
-                insights.append(
-                    f"  {sentiment_icon} {issue.issue_category}: {issue.ticket_count} tickets "
-                    f"(sentiment: {issue.avg_sentiment:.2f}, negative: {issue.negative_ratio:.0%})"
-                )
-                if issue.sample_descriptions:
-                    for desc in issue.sample_descriptions[:2]:
-                        insights.append(
-                            f'      └ "{desc[:100]}..."' if len(desc) > 100 else f'      └ "{desc}"'
-                        )
-
-            if resp.has_critical_issues:
-                insights.append("⚠️ Critical issues detected requiring attention!")
-
-        return self.success(findings=findings, insights=insights, recommendations=recommendations)
-
-    async def _run_complaint_trends(self, params: dict[str, Any]) -> AgentResult:
-        """Compare complaint volume between periods."""
-        current_days = params.get("current_days", 1)
-        previous_days = params.get("previous_days", 7)
-        issue_category = params.get("issue_category")
-
-        try:
-            resp = await self.tools.support.get_complaint_trends(
-                GetComplaintTrendsRequest(
-                    current_days=current_days,
-                    previous_days=previous_days,
-                    issue_category=issue_category,
-                )
-            )
-        except Exception as exc:
-            logger.exception("support agent (complaint_trends) failed: %s", exc)
-            return self.failure(exc)
-
-        findings: dict[str, Any] = {
-            "current_days": resp.current_days,
-            "previous_days": resp.previous_days,
-            "current_total": resp.current_total,
-            "previous_avg": resp.previous_avg,
-            "overall_change_pct": resp.overall_change_pct,
-            "complaint_increased": resp.complaint_increased,
-            "category_trends": [c.model_dump() for c in resp.category_trends],
-            "most_increased_category": resp.most_increased_category,
-        }
+        findings = resp.model_dump()
         insights: list[str] = []
         recommendations: list[AgentRecommendation] = []
 
         insights.append(
-            f"Complaint trends (last {current_days} day(s) vs {previous_days} days average):"
+            f"Ticket trends (last {resp.window_days} days, grouped by {resp.group_by}):"
         )
-        insights.append(f"  Current complaints: {resp.current_total}")
-        insights.append(f"  Previous daily average: {resp.previous_avg:.1f}")
+        insights.append(f"  Total volume: {resp.total_volume}")
 
-        if resp.complaint_increased:
-            insights.append(f"📈 Complaints INCREASED by {resp.overall_change_pct:+.1f}%")
-            if resp.most_increased_category:
-                insights.append(f"  Most increased category: {resp.most_increased_category}")
-
-            # Add recommendation if significant increase
-            if resp.overall_change_pct > 50:
-                recommendations.append(
-                    AgentRecommendation(
-                        action_type="investigate_complaints",
-                        payload={
-                            "change_pct": resp.overall_change_pct,
-                            "top_category": resp.most_increased_category,
-                        },
-                        reasoning=f"Complaints increased by {resp.overall_change_pct:.1f}%, investigate root cause",
-                        requires_approval=False,
-                    )
-                )
-        else:
-            insights.append(f"📉 Complaints decreased by {abs(resp.overall_change_pct):.1f}%")
-
-        if resp.current_avg_sentiment is not None and resp.previous_avg_sentiment is not None:
-            insights.append(
-                f"  Sentiment: {resp.current_avg_sentiment:.2f} (was {resp.previous_avg_sentiment:.2f})"
+        for trend in resp.trends[:10]:
+            trend_icon = (
+                "📈"
+                if trend.trend == "increasing"
+                else "📉" if trend.trend == "decreasing" else "➡️"
             )
+            insights.append(
+                f"  {trend_icon} {trend.key}: {trend.volume} tickets ({trend.change_pct:+.1f}%)"
+            )
+            if trend.avg_sentiment is not None and trend.avg_sentiment < 0.3:
+                insights.append(f"      ⚠️ Low sentiment: {trend.avg_sentiment:.2f}")
 
-        # Show category breakdowns
-        if resp.category_trends:
-            insights.append("Category breakdown:")
-            for cat in resp.category_trends[:5]:
-                trend_icon = (
-                    "📈"
-                    if cat.trend == "increasing"
-                    else "📉" if cat.trend == "decreasing" else "➡️"
-                )
-                insights.append(
-                    f"  {trend_icon} {cat.issue_category}: {cat.current_count} ({cat.change_pct:+.1f}%)"
-                )
+        if resp.alerts:
+            for alert in resp.alerts:
+                insights.append(f"🚨 {alert}")
 
         return self.success(findings=findings, insights=insights, recommendations=recommendations)

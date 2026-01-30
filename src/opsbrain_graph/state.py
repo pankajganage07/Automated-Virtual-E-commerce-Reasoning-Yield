@@ -44,6 +44,10 @@ class GraphState(TypedDict, total=False):
     needs_replan: bool  # Flag set by evaluation node
     replan_reason: str | None  # Why re-planning was triggered
 
+    # Cannot-handle routing fields (for slimmed agent architecture)
+    cannot_handle_agents: list[dict[str, Any]]  # Agents that returned cannot_handle
+    route_to_analyst: bool  # Flag to route to data_analyst for complex queries
+
     # HITL checkpointing fields
     thread_id: str | None  # Unique ID for this conversation/session
     hitl_pending_ids: list[int]  # IDs of pending actions awaiting approval

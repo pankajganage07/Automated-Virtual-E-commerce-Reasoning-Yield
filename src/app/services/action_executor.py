@@ -16,6 +16,8 @@ from opsbrain_graph.tools.exceptions import MCPError, ToolInvocationError
 
 # Mapping from action_type (what agents propose) to MCP tool name
 ACTION_TYPE_TO_TOOL: dict[str, str] = {
+    # Data Analyst - Custom SQL (HITL protected)
+    "execute_custom_sql": "execute_sql_query",
     # Inventory actions
     "restock_item": "update_inventory",
     "update_inventory": "update_inventory",
@@ -82,6 +84,7 @@ class ActionExecutor:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._mcp_base_url = f"http://localhost:{settings.mcp_server_port}"
+        self._mcp_api_key = settings.mcp_api_key
 
     async def execute(
         self,
@@ -113,7 +116,7 @@ class ActionExecutor:
         mcp_payload = transform_payload(action_type, payload)
 
         try:
-            async with MCPClient(base_url=self._mcp_base_url) as client:
+            async with MCPClient(base_url=self._mcp_base_url, api_key=self._mcp_api_key) as client:
                 result = await client.invoke(tool_name, mcp_payload)
                 return {
                     "success": True,
@@ -125,7 +128,7 @@ class ActionExecutor:
             raise ActionExecutionError(
                 action_type,
                 f"MCP tool '{tool_name}' returned error: {exc}",
-                details={"status_code": exc.status_code, "response": exc.response_text},
+                details={"status_code": exc.status, "response": exc.message},
             ) from exc
         except MCPError as exc:
             raise ActionExecutionError(

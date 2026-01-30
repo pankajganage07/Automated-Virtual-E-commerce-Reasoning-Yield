@@ -1,14 +1,21 @@
+"""
+Marketing Agent - Slimmed architecture (2 core capabilities).
+
+Capabilities:
+1. campaign_spend - Get campaign spend and conversion metrics
+2. calculate_roas - Calculate Return on Ad Spend
+
+Complex queries (underperforming, comparison) route to DataAnalystAgent.
+"""
+
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from opsbrain_graph.tools import GetCampaignSpendRequest
-from opsbrain_graph.tools.marketing_tools import (
-    GetUnderperformingCampaignsRequest,
-    CompareCampaignPerformanceRequest,
-    CalculateROASRequest,
-)
+from opsbrain_graph.tools.marketing_tools import CalculateROASRequest
 from .base_agent import (
     AgentCapability,
     AgentMetadata,
@@ -22,63 +29,65 @@ from .base_agent import (
 logger = logging.getLogger("agent.marketing")
 
 
+# Query patterns that this agent CANNOT handle (require DataAnalystAgent)
+COMPLEX_QUERY_PATTERNS = [
+    r"underperform",
+    r"poor.*(campaign|roas)",
+    r"zero.*conversion",
+    r"compare.*(campaign|performance|period)",
+    r"yesterday.*vs.*week",
+    r"campaign.*trend",
+    r"performance.*drop",
+    r"performance.*improve",
+    r"campaign.*comparison",
+    r"historical.*campaign",
+    r"best.*campaign",
+    r"worst.*campaign",
+    r"rank.*campaign",
+    r"top.*performer",
+    r"bottom.*performer",
+]
+
+
 class MarketingAgent(BaseAgent):
+    """
+    Marketing Agent with 2 core capabilities.
+
+    Complex queries trigger cannot_handle for routing to DataAnalystAgent.
+    """
+
     name = "marketing"
-    description = "Evaluates campaign performance and spend efficiency."
+    description = "Evaluates campaign spend and ROAS."
 
     metadata = AgentMetadata(
         name="marketing",
         display_name="MARKETING",
-        description="Evaluates marketing campaign performance, ad spend efficiency, ROAS, and identifies underperforming campaigns. Can compare performance across periods.",
+        description="Evaluates marketing campaign spend and calculates ROAS. For complex analytics (underperforming, comparisons), use data analyst.",
         capabilities=[
             AgentCapability(
-                name="campaign_analysis",
-                description="Analyze campaign spend, clicks, conversions, and ROAS",
+                name="campaign_spend",
+                description="Get campaign spend, clicks, and conversion metrics",
                 parameters={
-                    "campaign_ids": "Optional list of specific campaign IDs (default: all)",
-                    "window_days": "Time period to analyze (default: 7)",
+                    "campaign_ids": "Optional list of specific campaign IDs",
+                    "status": "Filter by status: active, paused (optional)",
                 },
                 example_queries=[
-                    "How are our marketing campaigns performing?",
-                    "What's our ad spend efficiency?",
-                    "Which campaigns have low ROAS?",
+                    "How much have we spent on campaigns?",
+                    "Show me campaign metrics",
+                    "What's our ad spend?",
                 ],
             ),
             AgentCapability(
-                name="budget_check",
-                description="Check campaign budgets and spend rates",
+                name="calculate_roas",
+                description="Calculate Return on Ad Spend for campaigns",
                 parameters={
-                    "campaign_ids": "Optional list of campaign IDs",
+                    "campaign_id": "Optional specific campaign ID",
+                    "window_days": "Analysis window (default: 7)",
                 },
                 example_queries=[
-                    "Are any campaigns overspending?",
-                    "Show me campaign budgets vs actual spend",
-                ],
-            ),
-            AgentCapability(
-                name="underperforming",
-                description="Find paused, zero-conversion, or low-ROAS campaigns",
-                parameters={
-                    "min_spend": "Minimum spend to consider (default: 0)",
-                    "include_paused": "Include paused campaigns (default: true)",
-                },
-                example_queries=[
-                    "Were any campaigns paused or underperforming?",
-                    "Which campaigns are wasting money?",
-                    "Find campaigns with zero conversions",
-                ],
-            ),
-            AgentCapability(
-                name="compare_performance",
-                description="Compare campaign performance between time periods",
-                parameters={
-                    "current_days": "Current period in days (default: 1)",
-                    "previous_days": "Previous period for comparison (default: 7)",
-                },
-                example_queries=[
-                    "Did campaign performance drop compared to last week?",
-                    "How do campaigns compare today vs last week?",
-                    "Campaign performance trends",
+                    "What's our ROAS?",
+                    "Calculate return on ad spend",
+                    "Campaign efficiency metrics",
                 ],
             ),
         ],
@@ -88,56 +97,86 @@ class MarketingAgent(BaseAgent):
             "marketing",
             "roas",
             "spend",
-            "promotion",
             "advertising",
             "budget",
-            "underperforming",
-            "paused",
         ],
-        priority_boost=["wasted spend", "zero conversions", "overspending"],
+        priority_boost=["wasted spend", "low roas"],
     )
+
+    def _is_complex_query(self, query: str) -> bool:
+        """Check if query requires complex analysis."""
+        query_lower = query.lower()
+        for pattern in COMPLEX_QUERY_PATTERNS:
+            if re.search(pattern, query_lower):
+                return True
+        return False
+
+    def _cannot_handle(self, query: str) -> AgentResult:
+        """Return cannot_handle status for supervisor to route to analyst."""
+        return AgentResult(
+            status="cannot_handle",
+            findings={
+                "query": query,
+                "reason": "This query requires complex marketing analysis (comparison, ranking, underperforming) that needs custom SQL.",
+                "suggested_agent": "data_analyst",
+            },
+            insights=[
+                "This marketing query requires advanced analytics beyond my core capabilities.",
+                "Routing to Data Analyst for custom SQL generation with HITL approval.",
+            ],
+            recommendations=[],
+        )
 
     async def run(self, task: AgentTask, context: AgentRunContext) -> AgentResult:
         params = task.parameters
-        mode = params.get("mode", "campaign_analysis")
+        query = params.get("query", "")
+        mode = params.get("mode", "campaign_spend")
 
-        if mode == "underperforming":
-            return await self._run_underperforming(params)
-        elif mode == "compare_performance":
-            return await self._run_compare_performance(params)
+        # Check for complex queries first
+        if self._is_complex_query(query):
+            logger.info("marketing agent: complex query detected, returning cannot_handle")
+            return self._cannot_handle(query)
+
+        if mode == "calculate_roas":
+            return await self._run_calculate_roas(params)
         else:
-            return await self._run_campaign_analysis(params)
+            return await self._run_campaign_spend(params)
 
-    async def _run_campaign_analysis(self, params: dict[str, Any]) -> AgentResult:
-        """Analyze campaign performance."""
+    async def _run_campaign_spend(self, params: dict[str, Any]) -> AgentResult:
+        """Get campaign spend metrics."""
         campaign_ids = params.get("campaign_ids")
-        window_days = params.get("window_days", 7)
+        status = params.get("status")
 
         try:
             spend = await self.tools.marketing.get_campaign_spend(
-                GetCampaignSpendRequest(campaign_ids=campaign_ids, window_days=window_days)
+                GetCampaignSpendRequest(campaign_ids=campaign_ids, status=status)
             )
         except Exception as exc:
-            logger.exception("marketing agent (campaign_analysis) failed: %s", exc)
+            logger.exception("marketing agent (campaign_spend) failed: %s", exc)
             return self.failure(exc)
 
         findings = spend.model_dump()
         insights: list[str] = []
         recommendations: list[AgentRecommendation] = []
 
-        insights.append(f"Campaign analysis for the last {window_days} days:")
+        insights.append("Campaign spend metrics:")
         insights.append(f"  Total spend: ${spend.summary.get('total_spend', 0):,.2f}")
-        insights.append(f"  Total campaigns: {len(spend.campaigns)}")
+        insights.append(f"  Total campaigns: {spend.campaign_count}")
 
         for campaign in spend.campaigns:
+            utilization = campaign.budget_utilization_pct
+            if utilization > 90:
+                insights.append(
+                    f"⚠️ Campaign {campaign.name} is at {utilization:.0f}% budget utilization"
+                )
             if campaign.status == "active" and campaign.spend > 0 and campaign.conversions == 0:
                 insights.append(
-                    f"⚠️ Campaign {campaign.name} (ID: {campaign.id}) spending ${campaign.spend:.2f} with 0 conversions."
+                    f"⚠️ Campaign {campaign.name} spending ${campaign.spend:.2f} with 0 conversions."
                 )
                 recommendations.append(
                     AgentRecommendation(
                         action_type="pause_campaign",
-                        payload={"campaign_id": campaign.id},
+                        payload={"campaign_id": campaign.campaign_id},
                         reasoning="Spend detected with zero conversions.",
                         requires_approval=True,
                     )
@@ -145,122 +184,51 @@ class MarketingAgent(BaseAgent):
 
         return self.success(findings=findings, insights=insights, recommendations=recommendations)
 
-    async def _run_underperforming(self, params: dict[str, Any]) -> AgentResult:
-        """Find underperforming or paused campaigns."""
-        min_spend = params.get("min_spend", 0)
-        include_paused = params.get("include_paused", True)
+    async def _run_calculate_roas(self, params: dict[str, Any]) -> AgentResult:
+        """Calculate ROAS for campaigns."""
+        campaign_id = params.get("campaign_id")
+        window_days = params.get("window_days", 7)
 
         try:
-            resp = await self.tools.marketing.get_underperforming_campaigns(
-                GetUnderperformingCampaignsRequest(
-                    min_spend=min_spend,
-                    include_paused=include_paused,
-                )
+            resp = await self.tools.marketing.calculate_roas(
+                CalculateROASRequest(campaign_id=campaign_id, window_days=window_days)
             )
         except Exception as exc:
-            logger.exception("marketing agent (underperforming) failed: %s", exc)
+            logger.exception("marketing agent (calculate_roas) failed: %s", exc)
             return self.failure(exc)
 
-        findings: dict[str, Any] = {
-            "underperforming_campaigns": [c.model_dump() for c in resp.underperforming_campaigns],
-            "total_count": resp.total_count,
-            "paused_count": resp.paused_count,
-            "zero_conversion_count": resp.zero_conversion_count,
-            "poor_roas_count": resp.poor_roas_count,
-            "has_issues": resp.has_issues,
-        }
+        findings = resp.model_dump()
         insights: list[str] = []
         recommendations: list[AgentRecommendation] = []
 
-        if not resp.has_issues:
-            insights.append("✅ All campaigns are performing well. No underperformers detected.")
-        else:
-            insights.append(f"Found {resp.total_count} underperforming campaigns:")
+        insights.append(f"ROAS analysis (last {resp.window_days} days):")
+        insights.append(f"  Overall ROAS: {resp.overall_roas:.2f}x")
+        insights.append(f"  Total spend: ${resp.total_spend:,.2f}")
+        insights.append(f"  Estimated revenue: ${resp.total_estimated_revenue:,.2f}")
 
-            if resp.paused_count > 0:
-                insights.append(f"  ⏸️ {resp.paused_count} campaigns are PAUSED")
-            if resp.zero_conversion_count > 0:
-                insights.append(
-                    f"  🚫 {resp.zero_conversion_count} campaigns have ZERO conversions"
-                )
-            if resp.poor_roas_count > 0:
-                insights.append(f"  📉 {resp.poor_roas_count} campaigns have POOR ROAS")
-
-            for campaign in resp.underperforming_campaigns:
-                issue_icon = (
-                    "⏸️"
-                    if campaign.status == "paused"
-                    else "🚫" if campaign.conversions == 0 else "📉"
-                )
-                insights.append(
-                    f"  {issue_icon} {campaign.name}: {campaign.issue} "
-                    f"(Spend: ${campaign.spend:,.2f}, ROAS: {campaign.roas:.2f})"
-                )
-
-                if campaign.status == "active" and campaign.conversions == 0:
-                    recommendations.append(
-                        AgentRecommendation(
-                            action_type="pause_campaign",
-                            payload={"campaign_id": campaign.campaign_id},
-                            reasoning=f"Campaign has spent ${campaign.spend:.2f} with zero conversions",
-                            requires_approval=True,
-                        )
-                    )
-
-        return self.success(findings=findings, insights=insights, recommendations=recommendations)
-
-    async def _run_compare_performance(self, params: dict[str, Any]) -> AgentResult:
-        """Compare campaign performance between periods."""
-        current_days = params.get("current_days", 1)
-        previous_days = params.get("previous_days", 7)
-        campaign_ids = params.get("campaign_ids")
-
-        try:
-            resp = await self.tools.marketing.compare_campaign_performance(
-                CompareCampaignPerformanceRequest(
-                    current_days=current_days,
-                    previous_days=previous_days,
-                    campaign_ids=campaign_ids,
+        for campaign in resp.campaigns:
+            perf_icon = (
+                "🟢"
+                if campaign.performance == "excellent"
+                else (
+                    "🟡"
+                    if campaign.performance == "good"
+                    else "🟠" if campaign.performance == "break_even" else "🔴"
                 )
             )
-        except Exception as exc:
-            logger.exception("marketing agent (compare_performance) failed: %s", exc)
-            return self.failure(exc)
+            insights.append(
+                f"  {perf_icon} {campaign.campaign_name}: ROAS {campaign.roas:.2f}x "
+                f"(${campaign.spend:,.2f} spend, {campaign.conversions} conversions)"
+            )
 
-        findings: dict[str, Any] = {
-            "current_days": resp.current_days,
-            "previous_days": resp.previous_days,
-            "campaigns": [c.model_dump() for c in resp.campaigns],
-            "total_current_spend": resp.total_current_spend,
-            "total_previous_spend": resp.total_previous_spend,
-            "overall_spend_change_pct": resp.overall_spend_change_pct,
-            "total_current_conversions": resp.total_current_conversions,
-            "total_previous_conversions": resp.total_previous_conversions,
-            "overall_conversion_change_pct": resp.overall_conversion_change_pct,
-            "declining_campaigns_count": resp.declining_campaigns_count,
-        }
-        insights: list[str] = []
-        recommendations: list[AgentRecommendation] = []
-
-        insights.append(
-            f"Campaign performance comparison (last {current_days} day(s) vs {previous_days} days):"
-        )
-        insights.append(
-            f"  Total spend: ${resp.total_current_spend:,.2f} ({resp.overall_spend_change_pct:+.1f}%)"
-        )
-        insights.append(
-            f"  Total conversions: {resp.total_current_conversions} ({resp.overall_conversion_change_pct:+.1f}%)"
-        )
-
-        if resp.declining_campaigns_count > 0:
-            insights.append(f"⚠️ {resp.declining_campaigns_count} campaigns are declining:")
-            for c in resp.campaigns:
-                if c.trend == "declining":
-                    insights.append(
-                        f"    📉 {c.name}: ROAS {c.previous_roas:.2f} → {c.current_roas:.2f} "
-                        f"({c.roas_change_pct:+.1f}%)"
+            if campaign.performance == "poor" and campaign.status == "active":
+                recommendations.append(
+                    AgentRecommendation(
+                        action_type="pause_campaign",
+                        payload={"campaign_id": campaign.campaign_id},
+                        reasoning=f"Poor ROAS of {campaign.roas:.2f}x with ${campaign.spend:.2f} spend",
+                        requires_approval=True,
                     )
-        else:
-            insights.append("✅ No campaigns are significantly declining.")
+                )
 
         return self.success(findings=findings, insights=insights, recommendations=recommendations)

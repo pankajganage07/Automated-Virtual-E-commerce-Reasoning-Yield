@@ -1,3 +1,13 @@
+"""
+Marketing tools for LangGraph agents.
+
+Slimmed toolset (2 core tools):
+1. get_campaign_spend - Get spend and conversion metrics
+2. calculate_roas - Calculate Return on Ad Spend
+
+Complex queries should route to DataAnalystAgent with HITL.
+"""
+
 from __future__ import annotations
 
 from pydantic import BaseModel, Field, ValidationError
@@ -6,24 +16,36 @@ from .exceptions import MCPError
 from .mcp_client import MCPClient
 
 
+# =============================================================================
+# GET CAMPAIGN SPEND (Core Tool #1)
+# =============================================================================
+
+
 class GetCampaignSpendRequest(BaseModel):
-    campaign_ids: list[int] | None = None
-    window_days: int = 7
+    campaign_ids: list[int] | None = Field(default=None, description="Optional campaign IDs filter")
+    status: str | None = Field(default=None, description="Filter by status: active, paused")
 
 
 class CampaignInfo(BaseModel):
-    id: int
+    campaign_id: int
     name: str
     budget: float
     spend: float
     clicks: int
     conversions: int
     status: str
+    budget_utilization_pct: float = 0
 
 
 class GetCampaignSpendResponse(BaseModel):
-    summary: dict[str, float]
-    campaigns: list[CampaignInfo]
+    summary: dict[str, float] = Field(default_factory=dict)
+    campaigns: list[CampaignInfo] = Field(default_factory=list)
+    campaign_count: int = 0
+
+
+# =============================================================================
+# CALCULATE ROAS (Core Tool #2)
+# =============================================================================
 
 
 class CalculateROASRequest(BaseModel):
@@ -54,17 +76,18 @@ class CampaignROASInfo(BaseModel):
 class CalculateROASResponse(BaseModel):
     """Response from ROAS calculation."""
 
-    window_days: int | None = None
-    avg_order_value_used: float | None = None
-    overall_roas: float | None = None
-    total_spend: float | None = None
-    total_estimated_revenue: float | None = None
-    campaigns: list[CampaignROASInfo] | None = None
-    # Legacy fields for backward compatibility
-    campaign_id: int | None = None
-    roas: float | None = None
-    notes: str | None = None
+    window_days: int = 7
+    avg_order_value_used: float = 0
+    overall_roas: float = 0
+    total_spend: float = 0
+    total_estimated_revenue: float = 0
+    campaigns: list[CampaignROASInfo] = Field(default_factory=list)
     error: str | None = None
+
+
+# =============================================================================
+# ACTION TOOLS (for HITL execution)
+# =============================================================================
 
 
 class PauseCampaignRequest(BaseModel):
@@ -125,74 +148,27 @@ class AdjustBudgetResponse(BaseModel):
     error: str | None = None
 
 
-# New request/response models for additional marketing tools
-class GetUnderperformingCampaignsRequest(BaseModel):
-    min_spend: float = Field(default=0, ge=0)
-    include_paused: bool = Field(default=True)
-
-
-class UnderperformingCampaign(BaseModel):
-    campaign_id: int
-    name: str
-    status: str
-    budget: float
-    spend: float
-    clicks: int
-    conversions: int
-    roas: float
-    issue: str
-
-
-class GetUnderperformingCampaignsResponse(BaseModel):
-    underperforming_campaigns: list[UnderperformingCampaign] = Field(default_factory=list)
-    total_count: int = 0
-    paused_count: int = 0
-    zero_conversion_count: int = 0
-    poor_roas_count: int = 0
-    has_issues: bool = False
-
-
-class CompareCampaignPerformanceRequest(BaseModel):
-    current_days: int = Field(default=1, ge=1, le=30)
-    previous_days: int = Field(default=7, ge=1, le=30)
-    campaign_ids: list[int] | None = None
-
-
-class CampaignPerformanceComparison(BaseModel):
-    campaign_id: int
-    name: str
-    current_spend: float
-    previous_spend: float
-    current_conversions: int
-    previous_conversions: int
-    current_roas: float
-    previous_roas: float
-    spend_change_pct: float
-    conversion_change_pct: float
-    roas_change_pct: float
-    trend: str
-
-
-class CompareCampaignPerformanceResponse(BaseModel):
-    current_days: int = 1
-    previous_days: int = 7
-    campaigns: list[CampaignPerformanceComparison] = Field(default_factory=list)
-    total_current_spend: float = 0
-    total_previous_spend: float = 0
-    overall_spend_change_pct: float = 0
-    total_current_conversions: int = 0
-    total_previous_conversions: int = 0
-    overall_conversion_change_pct: float = 0
-    declining_campaigns_count: int = 0
+# =============================================================================
+# MARKETING TOOLSET
+# =============================================================================
 
 
 class MarketingToolset:
+    """
+    Marketing tools (2 core tools).
+
+    For complex queries (underperforming campaigns, campaign comparison),
+    the agent should indicate it cannot handle the query, and the supervisor
+    will route to the DataAnalystAgent.
+    """
+
     def __init__(self, client: MCPClient) -> None:
         self._client = client
 
     async def get_campaign_spend(
         self, payload: GetCampaignSpendRequest
     ) -> GetCampaignSpendResponse:
+        """Get spend and conversion metrics for campaigns."""
         result = await self._client.invoke("get_campaign_spend", payload.model_dump())
         try:
             return GetCampaignSpendResponse.model_validate(result)
@@ -200,6 +176,7 @@ class MarketingToolset:
             raise MCPError(f"Invalid response for get_campaign_spend: {exc}") from exc
 
     async def calculate_roas(self, payload: CalculateROASRequest) -> CalculateROASResponse:
+        """Calculate ROAS for campaigns."""
         result = await self._client.invoke("calculate_roas", payload.model_dump())
         try:
             return CalculateROASResponse.model_validate(result)
@@ -239,23 +216,3 @@ class MarketingToolset:
             return AdjustBudgetResponse.model_validate(result)
         except ValidationError as exc:
             raise MCPError(f"Invalid response for adjust_budget: {exc}") from exc
-
-    async def get_underperforming_campaigns(
-        self, payload: GetUnderperformingCampaignsRequest
-    ) -> GetUnderperformingCampaignsResponse:
-        """Get underperforming or paused campaigns."""
-        result = await self._client.invoke("get_underperforming_campaigns", payload.model_dump())
-        try:
-            return GetUnderperformingCampaignsResponse.model_validate(result)
-        except ValidationError as exc:
-            raise MCPError(f"Invalid response for get_underperforming_campaigns: {exc}") from exc
-
-    async def compare_campaign_performance(
-        self, payload: CompareCampaignPerformanceRequest
-    ) -> CompareCampaignPerformanceResponse:
-        """Compare campaign performance between periods."""
-        result = await self._client.invoke("compare_campaign_performance", payload.model_dump())
-        try:
-            return CompareCampaignPerformanceResponse.model_validate(result)
-        except ValidationError as exc:
-            raise MCPError(f"Invalid response for compare_campaign_performance: {exc}") from exc

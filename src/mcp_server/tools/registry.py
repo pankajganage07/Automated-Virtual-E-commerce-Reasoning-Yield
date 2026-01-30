@@ -1,35 +1,25 @@
+"""
+MCP Tool Registry.
+
+Slimmed architecture:
+- Each domain has 2 core tools
+- Complex queries route to Data Analyst + HITL
+- execute_sql reserved for approved custom queries
+"""
+
 from __future__ import annotations
 
 from typing import Dict
 
 from .base import BaseTool
 from .sql_tool import ExecuteSQLTool
-from .sales_tools import (
-    GetSalesSummaryTool,
-    GetTopProductsTool,
-    CompareSalesPeriodsTool,
-    GetRegionalSalesTool,
-    GetChannelPerformanceTool,
-    GetProductContributionTool,
-)
-from .inventory_tool import (
-    GetInventoryStatusTool,
-    PredictStockOutTool,
-    GetLowStockProductsTool,
-    CheckTopSellersStockTool,
-)
-from .marketing_tool import (
-    GetCampaignSpendTool,
-    CalculateROASTool,
-    GetUnderperformingCampaignsTool,
-    CompareCampaignPerformanceTool,
-)
-from .support_tool import (
-    GetSupportSentimentTool,
-    GetTicketTrendsTool,
-    GetCommonIssuesTool,
-    GetComplaintTrendsTool,
-)
+
+# Slimmed domain tools (2 per domain)
+from .sales_tools import GetSalesSummaryTool, GetTopProductsTool
+from .inventory_tool import GetInventoryStatusTool, GetLowStockProductsTool
+from .marketing_tool import GetCampaignSpendTool, CalculateROASTool
+from .support_tool import GetSupportSentimentTool, GetTicketTrendsTool
+
 from .memory_tool import QueryMemoryTool, SaveMemoryTool, ListIncidentsTool
 from .action_tools import (
     UpdateInventoryTool,
@@ -41,29 +31,20 @@ from .action_tools import (
 )
 
 TOOL_REGISTRY: Dict[str, BaseTool] = {
-    # Query tools - Sales
+    # Data Analyst tool - for approved custom SQL (HITL protected)
     ExecuteSQLTool.name: ExecuteSQLTool(),
+    # Query tools - Sales (2 core)
     GetSalesSummaryTool.name: GetSalesSummaryTool(),
     GetTopProductsTool.name: GetTopProductsTool(),
-    CompareSalesPeriodsTool.name: CompareSalesPeriodsTool(),
-    GetRegionalSalesTool.name: GetRegionalSalesTool(),
-    GetChannelPerformanceTool.name: GetChannelPerformanceTool(),
-    GetProductContributionTool.name: GetProductContributionTool(),
-    # Query tools - Inventory
+    # Query tools - Inventory (2 core)
     GetInventoryStatusTool.name: GetInventoryStatusTool(),
-    PredictStockOutTool.name: PredictStockOutTool(),
     GetLowStockProductsTool.name: GetLowStockProductsTool(),
-    CheckTopSellersStockTool.name: CheckTopSellersStockTool(),
-    # Query tools - Marketing
+    # Query tools - Marketing (2 core)
     GetCampaignSpendTool.name: GetCampaignSpendTool(),
     CalculateROASTool.name: CalculateROASTool(),
-    GetUnderperformingCampaignsTool.name: GetUnderperformingCampaignsTool(),
-    CompareCampaignPerformanceTool.name: CompareCampaignPerformanceTool(),
-    # Query tools - Support
+    # Query tools - Support (2 core)
     GetSupportSentimentTool.name: GetSupportSentimentTool(),
     GetTicketTrendsTool.name: GetTicketTrendsTool(),
-    GetCommonIssuesTool.name: GetCommonIssuesTool(),
-    GetComplaintTrendsTool.name: GetComplaintTrendsTool(),
     # Memory tools
     QueryMemoryTool.name: QueryMemoryTool(),
     SaveMemoryTool.name: SaveMemoryTool(),

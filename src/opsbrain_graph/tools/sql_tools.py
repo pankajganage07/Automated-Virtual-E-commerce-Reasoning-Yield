@@ -1,3 +1,11 @@
+"""
+SQL and Sales tools for LangGraph agents.
+
+Slimmed toolsets:
+- SalesToolset: get_sales_summary, get_top_products (2 core tools)
+- Complex queries route to DataAnalystAgent with HITL
+"""
+
 from __future__ import annotations
 
 from typing import Any, Literal
@@ -6,6 +14,11 @@ from pydantic import BaseModel, Field, ValidationError
 
 from .mcp_client import MCPClient
 from .exceptions import MCPError
+
+
+# =============================================================================
+# SQL TOOL (for approved custom queries via HITL)
+# =============================================================================
 
 
 class ExecuteSQLRequest(BaseModel):
@@ -21,6 +34,8 @@ class ExecuteSQLResponse(BaseModel):
 
 
 class SQLToolset:
+    """Raw SQL execution toolset - used by action_executor for approved queries."""
+
     def __init__(self, client: MCPClient) -> None:
         self._client = client
 
@@ -32,25 +47,9 @@ class SQLToolset:
             raise MCPError(f"Invalid response for execute_sql_query: {exc}") from exc
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Sales-specific tools
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class GetTopProductsRequest(BaseModel):
-    window_days: int = Field(default=7, ge=1, le=90)
-    limit: int = Field(default=5, ge=1, le=50)
-
-
-class TopProduct(BaseModel):
-    product_id: int
-    name: str
-    units_sold: int
-    revenue: float
-
-
-class GetTopProductsResponse(BaseModel):
-    products: list[TopProduct] = Field(default_factory=list)
+# =============================================================================
+# SALES TOOLSET (2 core tools)
+# =============================================================================
 
 
 class GetSalesSummaryRequest(BaseModel):
@@ -61,145 +60,52 @@ class GetSalesSummaryRequest(BaseModel):
 class SalesSummaryResponse(BaseModel):
     summary: dict[str, Any] = Field(default_factory=dict)
     trend: list[dict[str, Any]] = Field(default_factory=list)
+    trend_analysis: str = Field(default="stable")
 
 
-# New request/response models for additional sales tools
-class CompareSalesPeriodsRequest(BaseModel):
-    current_days: int = Field(default=1, ge=1, le=30)
-    previous_days: int = Field(default=7, ge=1, le=90)
-
-
-class CompareSalesPeriodsResponse(BaseModel):
-    current_days: int = 1
-    previous_days: int = 7
-    current_revenue: float = 0
-    previous_revenue: float = 0
-    current_orders: int = 0
-    previous_orders: int = 0
-    revenue_change_pct: float = 0
-    order_change_pct: float = 0
-    avg_order_value_change_pct: float = 0
-    trend: str = "stable"
-
-
-class GetRegionalSalesRequest(BaseModel):
+class GetTopProductsRequest(BaseModel):
     window_days: int = Field(default=7, ge=1, le=90)
-    compare_to_avg: bool = Field(default=True)
+    limit: int = Field(default=5, ge=1, le=50)
 
 
-class RegionalSales(BaseModel):
-    region: str
-    revenue: float
-    order_count: int
-    revenue_share_pct: float = 0
-    change_pct: float = 0
-
-
-class GetRegionalSalesResponse(BaseModel):
-    window_days: int = 7
-    total_revenue: float = 0
-    regions: list[RegionalSales] = Field(default_factory=list)
-    underperforming_regions: list[RegionalSales] = Field(default_factory=list)
-    top_region: str | None = None
-    worst_region: str | None = None
-
-
-class GetChannelPerformanceRequest(BaseModel):
-    window_days: int = Field(default=7, ge=1, le=90)
-
-
-class ChannelSales(BaseModel):
-    channel: str
-    revenue: float
-    orders: int
-    avg_order_value: float = 0
-    revenue_share: float = 0
-
-
-class GetChannelPerformanceResponse(BaseModel):
-    window_days: int = 7
-    total_revenue: float = 0
-    channels: list[ChannelSales] = Field(default_factory=list)
-    top_channel: str | None = None
-    worst_channel: str | None = None
-
-
-class GetProductContributionRequest(BaseModel):
-    current_days: int = Field(default=1, ge=1, le=7)
-    previous_days: int = Field(default=7, ge=1, le=30)
-    limit: int = Field(default=10, ge=1, le=50)
-
-
-class ProductContribution(BaseModel):
+class TopProduct(BaseModel):
     product_id: int
     name: str
-    current_revenue: float = 0
-    previous_avg_revenue: float = 0
-    change_pct: float = 0
-    contribution_pct: float = 0
+    category: str | None = None
+    units_sold: int
+    revenue: float
 
 
-class GetProductContributionResponse(BaseModel):
-    current_days: int = 1
-    previous_days: int = 7
-    overall_change_pct: float = 0
-    products: list[ProductContribution] = Field(default_factory=list)
-    biggest_gainers: list[ProductContribution] = Field(default_factory=list)
-    biggest_losers: list[ProductContribution] = Field(default_factory=list)
+class GetTopProductsResponse(BaseModel):
+    products: list[TopProduct] = Field(default_factory=list)
+    window_days: int = 7
+    total_top_products_revenue: float = 0
 
 
 class SalesToolset:
-    """Sales-specific tools that wrap MCP server endpoints."""
+    """
+    Sales-specific tools (2 core tools).
+
+    For complex queries (compare periods, regional, channel, product contribution),
+    the agent should indicate it cannot handle the query, and the supervisor
+    will route to the DataAnalystAgent.
+    """
 
     def __init__(self, client: MCPClient) -> None:
         self._client = client
 
-    async def get_top_products(self, payload: GetTopProductsRequest) -> GetTopProductsResponse:
-        result = await self._client.invoke("get_top_products", payload.model_dump())
-        try:
-            return GetTopProductsResponse.model_validate(result)
-        except ValidationError as exc:
-            raise MCPError(f"Invalid response for get_top_products: {exc}") from exc
-
     async def get_sales_summary(self, payload: GetSalesSummaryRequest) -> SalesSummaryResponse:
+        """Get aggregated sales metrics with trend analysis."""
         result = await self._client.invoke("get_sales_summary", payload.model_dump())
         try:
             return SalesSummaryResponse.model_validate(result)
         except ValidationError as exc:
             raise MCPError(f"Invalid response for get_sales_summary: {exc}") from exc
 
-    async def compare_sales_periods(
-        self, payload: CompareSalesPeriodsRequest
-    ) -> CompareSalesPeriodsResponse:
-        result = await self._client.invoke("compare_sales_periods", payload.model_dump())
+    async def get_top_products(self, payload: GetTopProductsRequest) -> GetTopProductsResponse:
+        """Get best selling products by revenue."""
+        result = await self._client.invoke("get_top_products", payload.model_dump())
         try:
-            return CompareSalesPeriodsResponse.model_validate(result)
+            return GetTopProductsResponse.model_validate(result)
         except ValidationError as exc:
-            raise MCPError(f"Invalid response for compare_sales_periods: {exc}") from exc
-
-    async def get_regional_sales(
-        self, payload: GetRegionalSalesRequest
-    ) -> GetRegionalSalesResponse:
-        result = await self._client.invoke("get_regional_sales", payload.model_dump())
-        try:
-            return GetRegionalSalesResponse.model_validate(result)
-        except ValidationError as exc:
-            raise MCPError(f"Invalid response for get_regional_sales: {exc}") from exc
-
-    async def get_channel_performance(
-        self, payload: GetChannelPerformanceRequest
-    ) -> GetChannelPerformanceResponse:
-        result = await self._client.invoke("get_channel_performance", payload.model_dump())
-        try:
-            return GetChannelPerformanceResponse.model_validate(result)
-        except ValidationError as exc:
-            raise MCPError(f"Invalid response for get_channel_performance: {exc}") from exc
-
-    async def get_product_contribution(
-        self, payload: GetProductContributionRequest
-    ) -> GetProductContributionResponse:
-        result = await self._client.invoke("get_product_contribution", payload.model_dump())
-        try:
-            return GetProductContributionResponse.model_validate(result)
-        except ValidationError as exc:
-            raise MCPError(f"Invalid response for get_product_contribution: {exc}") from exc
+            raise MCPError(f"Invalid response for get_top_products: {exc}") from exc

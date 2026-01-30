@@ -1,16 +1,25 @@
+"""
+Inventory Agent - Slimmed architecture (2 core capabilities).
+
+Capabilities:
+1. check_stock - Check inventory status for products
+2. low_stock_scan - Scan for low stock products
+
+Complex queries (stock-out predictions, top-sellers analysis) route to DataAnalystAgent.
+"""
+
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from opsbrain_graph.tools import (
     GetInventoryStatusRequest,
-    PredictStockOutRequest,
     InventoryToolset,
 )
 from opsbrain_graph.tools.inventory_tools import (
     GetLowStockProductsRequest,
-    CheckTopSellersStockRequest,
 )
 from .base_agent import (
     AgentCapability,
@@ -25,62 +34,63 @@ from .base_agent import (
 logger = logging.getLogger("agent.inventory")
 
 
+# Query patterns that this agent CANNOT handle (require DataAnalystAgent)
+COMPLEX_QUERY_PATTERNS = [
+    r"predict.*stock",
+    r"stock.*out.*predict",
+    r"when.*run\s*out",
+    r"forecast.*inventory",
+    r"top.*(seller|product).*stock",
+    r"best.*(seller|product).*(out|low)",
+    r"compare.*inventory.*period",
+    r"historical.*stock",
+    r"trend.*inventory",
+    r"stock.*trend",
+    r"regional.*inventory",
+    r"warehouse.*comparison",
+    r"turnover.*rate",
+    r"inventory.*velocity",
+    r"days.*of.*supply",
+]
+
+
 class InventoryAgent(BaseAgent):
+    """
+    Inventory Agent with 2 core capabilities.
+
+    Complex queries trigger cannot_handle for routing to DataAnalystAgent.
+    """
+
     name = "inventory"
-    description = "Monitors stock levels and predicts stock-outs."
+    description = "Monitors stock levels and identifies low-stock items."
 
     metadata = AgentMetadata(
         name="inventory",
         display_name="INVENTORY",
-        description="Monitors stock levels, identifies low-stock items, predicts stock-outs, and checks if top sellers have inventory issues.",
+        description="Monitors current stock levels and identifies low-stock products. For complex analytics (predictions, top-seller analysis), use data analyst.",
         capabilities=[
             AgentCapability(
                 name="check_stock",
                 description="Check current stock levels for specific products",
                 parameters={
-                    "product_ids": "List of product IDs to check (required)",
+                    "product_ids": "List of product IDs to check (optional)",
                 },
                 example_queries=[
                     "What's the stock level for product 123?",
-                    "Check inventory for our top sellers",
+                    "Check inventory for these products",
                 ],
             ),
             AgentCapability(
-                name="low_stock_alert",
-                description="Identify products below their low_stock_threshold",
+                name="low_stock_scan",
+                description="Scan ALL products for low stock issues",
                 parameters={
-                    "product_ids": "List of product IDs to check (optional - if not provided, checks all)",
+                    "include_out_of_stock": "Include out-of-stock items (default: true)",
+                    "limit": "Max products to return (default: 20)",
                 },
                 example_queries=[
                     "Which products need restocking?",
                     "Show me low stock items",
                     "What's about to run out?",
-                ],
-            ),
-            AgentCapability(
-                name="low_stock_scan",
-                description="Scan ALL products for low stock issues without needing product IDs",
-                parameters={
-                    "include_out_of_stock": "Include completely out-of-stock items (default: true)",
-                    "limit": "Max products to return (default: 20)",
-                },
-                example_queries=[
-                    "Which products are close to stock-out?",
-                    "Are we running low on any products?",
-                    "Show all low inventory items",
-                ],
-            ),
-            AgentCapability(
-                name="top_sellers_stock",
-                description="Check if top-selling products have stock issues",
-                parameters={
-                    "window_days": "Period to check top sellers (default: 7)",
-                    "top_n": "Number of top sellers to check (default: 10)",
-                },
-                example_queries=[
-                    "Were any top-selling products out of stock yesterday?",
-                    "Do our best sellers have enough inventory?",
-                    "Check stock levels for top performers",
                 ],
             ),
         ],
@@ -89,23 +99,48 @@ class InventoryAgent(BaseAgent):
             "inventory",
             "out of stock",
             "restock",
-            "supply",
-            "warehouse",
-            "quantity",
             "low stock",
-            "stockout",
+            "quantity",
         ],
         priority_boost=["out of stock", "urgent restock", "stockout"],
     )
 
+    def _is_complex_query(self, query: str) -> bool:
+        """Check if query requires complex analysis."""
+        query_lower = query.lower()
+        for pattern in COMPLEX_QUERY_PATTERNS:
+            if re.search(pattern, query_lower):
+                return True
+        return False
+
+    def _cannot_handle(self, query: str) -> AgentResult:
+        """Return cannot_handle status for supervisor to route to analyst."""
+        return AgentResult(
+            status="cannot_handle",
+            findings={
+                "query": query,
+                "reason": "This query requires complex inventory analysis (prediction, trending, cross-analysis) that needs custom SQL.",
+                "suggested_agent": "data_analyst",
+            },
+            insights=[
+                "This inventory query requires advanced analytics beyond my core capabilities.",
+                "Routing to Data Analyst for custom SQL generation with HITL approval.",
+            ],
+            recommendations=[],
+        )
+
     async def run(self, task: AgentTask, context: AgentRunContext) -> AgentResult:
         params = task.parameters
+        query = params.get("query", "")
         mode = params.get("mode", "check_stock")
+
+        # Check for complex queries first
+        if self._is_complex_query(query):
+            logger.info("inventory agent: complex query detected, returning cannot_handle")
+            return self._cannot_handle(query)
 
         if mode == "low_stock_scan":
             return await self._run_low_stock_scan(params)
-        elif mode == "top_sellers_stock":
-            return await self._run_top_sellers_stock(params)
         else:
             return await self._run_check_stock(params)
 
@@ -204,66 +239,5 @@ class InventoryAgent(BaseAgent):
                             requires_approval=True,
                         )
                     )
-
-        return self.success(findings=findings, insights=insights, recommendations=recommendations)
-
-    async def _run_top_sellers_stock(self, params: dict[str, Any]) -> AgentResult:
-        """Check if top-selling products have stock issues."""
-        window_days = params.get("window_days", 7)
-        top_n = params.get("top_n", 10)
-
-        try:
-            resp = await self.tools.inventory.check_top_sellers_stock(
-                CheckTopSellersStockRequest(window_days=window_days, top_n=top_n)
-            )
-        except Exception as exc:
-            logger.exception("inventory agent (top_sellers_stock) failed: %s", exc)
-            return self.failure(exc)
-
-        findings: dict[str, Any] = {
-            "window_days": resp.window_days,
-            "top_sellers": [s.model_dump() for s in resp.top_sellers],
-            "out_of_stock_top_sellers": [s.model_dump() for s in resp.out_of_stock_top_sellers],
-            "low_stock_top_sellers": [s.model_dump() for s in resp.low_stock_top_sellers],
-            "has_stock_issues": resp.has_stock_issues,
-            "potential_revenue_at_risk": resp.potential_revenue_at_risk,
-        }
-        insights: list[str] = []
-        recommendations: list[AgentRecommendation] = []
-
-        insights.append(f"Top {top_n} sellers stock check (last {window_days} days):")
-
-        if not resp.has_stock_issues:
-            insights.append("✅ All top-selling products are well-stocked!")
-        else:
-            if resp.out_of_stock_top_sellers:
-                insights.append(
-                    f"🔴 {len(resp.out_of_stock_top_sellers)} top sellers are OUT OF STOCK:"
-                )
-                for s in resp.out_of_stock_top_sellers:
-                    insights.append(
-                        f"    - {s.name} (${s.revenue:,.2f} revenue, {s.units_sold} sold)"
-                    )
-                    recommendations.append(
-                        AgentRecommendation(
-                            action_type="urgent_restock",
-                            payload={
-                                "product_id": s.product_id,
-                                "quantity": max(100, s.units_sold),
-                            },
-                            reasoning=f"Top seller {s.name} is out of stock - generated ${s.revenue:,.2f} in revenue",
-                            requires_approval=True,
-                        )
-                    )
-
-            if resp.low_stock_top_sellers:
-                insights.append(f"🟠 {len(resp.low_stock_top_sellers)} top sellers have LOW stock:")
-                for s in resp.low_stock_top_sellers:
-                    insights.append(f"    - {s.name}: {s.stock_qty} units left")
-
-            if resp.potential_revenue_at_risk > 0:
-                insights.append(
-                    f"💰 Potential revenue at risk: ${resp.potential_revenue_at_risk:,.2f}"
-                )
 
         return self.success(findings=findings, insights=insights, recommendations=recommendations)
