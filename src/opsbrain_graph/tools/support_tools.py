@@ -1,3 +1,13 @@
+"""
+Support tools for LangGraph agents.
+
+Slimmed toolset (2 core tools):
+1. get_support_sentiment - Get sentiment analysis and ticket volume
+2. get_ticket_trends - Analyze trends by category/product/day
+
+Complex queries should route to DataAnalystAgent with HITL.
+"""
+
 from __future__ import annotations
 
 from pydantic import BaseModel, Field, ValidationError
@@ -6,9 +16,14 @@ from .exceptions import MCPError
 from .mcp_client import MCPClient
 
 
+# =============================================================================
+# GET SUPPORT SENTIMENT (Core Tool #1)
+# =============================================================================
+
+
 class GetSupportSentimentRequest(BaseModel):
-    window_days: int = 7
-    product_id: int | None = None
+    window_days: int = Field(default=7, ge=1, le=90, description="Analysis window in days")
+    product_id: int | None = Field(None, description="Optional product filter")
 
 
 class SentimentStats(BaseModel):
@@ -19,6 +34,11 @@ class SentimentStats(BaseModel):
 
 class GetSupportSentimentResponse(BaseModel):
     sentiment: SentimentStats
+
+
+# =============================================================================
+# GET TICKET TRENDS (Core Tool #2)
+# =============================================================================
 
 
 class GetTicketTrendsRequest(BaseModel):
@@ -49,12 +69,12 @@ class GetTicketTrendsResponse(BaseModel):
     window_days: int | None = None
     group_by: str | None = None
     total_volume: int | None = None
-    trends: list[TicketTrend]
+    trends: list[TicketTrend] = Field(default_factory=list)
     alerts: list[str] | None = None
 
 
 # =============================================================================
-# HITL ACTION REQUEST/RESPONSE MODELS
+# ACTION TOOLS (for HITL execution)
 # =============================================================================
 
 
@@ -116,17 +136,31 @@ class PrioritizeTicketResponse(BaseModel):
     error: str | None = None
 
 
+# =============================================================================
+# SUPPORT TOOLSET
+# =============================================================================
+
+
 class SupportToolset:
+    """
+    Support tools (2 core tools).
+
+    For complex queries (common issues analysis, complaint trend comparison),
+    the agent should indicate it cannot handle the query, and the supervisor
+    will route to the DataAnalystAgent.
+    """
+
     def __init__(self, client: MCPClient) -> None:
         self._client = client
 
     # =========================================================================
-    # READ OPERATIONS
+    # CORE READ OPERATIONS
     # =========================================================================
 
     async def get_support_sentiment(
         self, payload: GetSupportSentimentRequest
     ) -> GetSupportSentimentResponse:
+        """Get sentiment analysis and ticket volume metrics."""
         result = await self._client.invoke("get_support_sentiment", payload.model_dump())
         try:
             return GetSupportSentimentResponse.model_validate(result)
@@ -134,6 +168,7 @@ class SupportToolset:
             raise MCPError(f"Invalid response for get_support_sentiment: {exc}") from exc
 
     async def get_ticket_trends(self, payload: GetTicketTrendsRequest) -> GetTicketTrendsResponse:
+        """Analyze ticket trends by category, product, or day."""
         result = await self._client.invoke("get_ticket_trends", payload.model_dump())
         try:
             return GetTicketTrendsResponse.model_validate(result)

@@ -1,0 +1,126 @@
+id,product_id,sentiment,issue_category,description,days_ago
+1,1,0.2,shipping,Delayed delivery for the water bottle. Expected 3 days but took 10.,0
+2,3,0.3,quality,Yoga mat edges fraying after a week of use.,0
+3,2,0.15,defect,Smart bulb stopped working after 2 days. Very disappointed.,1
+4,5,0.8,inquiry,When will the ZenAir Purifier be back in stock?,1
+5,4,0.25,quality,One knife in the set arrived with a loose handle.,1
+6,1,0.4,shipping,Package arrived damaged but product was okay.,2
+7,6,0.35,quality,Dumbbell rubber coating peeling off already.,2
+8,3,0.1,refund,Want to return yoga mat - not as described in listing.,2
+9,2,0.5,support,Need help connecting the bulb to my smart home system.,3
+10,8,0.2,defect,Thermostat display flickering intermittently.,3
+11,1,0.6,inquiry,Is the EcoWater Bottle dishwasher safe?,3
+12,5,0.15,complaint,Ordered purifier but it was out of stock - no notification!,4
+13,4,0.3,shipping,Wrong item delivered. Received plates instead of knives.,4
+14,7,0.45,quality,Filter replacement instructions unclear.,5
+15,3,0.2,refund,Mat has chemical smell that won't go away.,5
+16,2,0.25,defect,Bulb flickers when dimmed below 50%.,6
+17,10,0.1,quality,Plates arrived with chips on the edges.,6
+18,6,0.55,support,Need assembly instructions for dumbbell rack.,7
+19,9,0.4,shipping,Yoga blocks delivered to wrong address; had to pick up from neighbor.,7
+20,11,0.55,inquiry,Is the BrewMaster French Press dishwasher safe?,7
+21,12,0.3,quality,SleepCloud Pillow stitching unraveling after two nights.,8
+22,13,0.2,defect,Fitness band screen froze and won't reboot.,8
+23,14,0.6,inquiry,Does the BreezeMax Fan have a timer setting?,8
+24,15,0.45,quality,Two solar lights won't turn on even after full charge.,9
+25,16,0.25,defect,Humidifier leaking water from the base.,9
+26,17,0.7,support,Need instructions to customize DPI on GlidePro Mouse.,9
+27,18,0.5,inquiry,Which oils are safe for the ZenDen Diffuser?,9
+28,19,0.15,shipping,Cooler arrived dented on one corner.,10
+29,20,0.4,quality,Power bank heats up when charging tablet.,10
+30,21,0.35,refund,Resistance bands too light; want return label.,10
+31,22,0.55,support,Need help setting temperature presets on kettle.,10
+32,23,0.2,quality,Balance board surface peeling after first session.,11
+33,24,0.45,defect,Lamp touch sensor stuck on brightest mode.,11
+34,25,0.7,shipping,"Slippers delivered early, thanks!",11
+35,26,0.3,defect,One glass in the set arrived cracked.,11
+36,27,0.4,quality,Earbud left channel softer than right.,12
+37,28,0.6,inquiry,What is backpack's laptop sleeve size?,12
+38,29,0.5,quality,Throw blanket sheds lint after washing.,12
+39,30,0.35,defect,Skillet handle became loose when heated.,12
+40,31,0.45,quality,Foam roller started flattening in center.,13
+41,32,0.2,complaint,Robot vacuum out of stock but order went through.,13
+42,33,0.65,support,Need bulk quote for ear plugs.,13
+43,34,0.3,defect,Juicer motor stopped spinning day two.,13
+44,35,0.75,inquiry,Are notebooks made with recycled paper?,13
+45,36,0.25,quality,Heart monitor strap irritates skin.,14
+46,37,0.15,defect,Water cooler compressor not cooling at all.,14
+47,38,0.55,support,How to replace bulbs on vanity mirror?,14
+48,39,0.6,inquiry,Are storage bins stackable with lids?,14
+49,40,0.1,complaint,Air conditioner missing remote control.,15
+50,41,0.35,shipping,Suitcase took two weeks to arrive.,15
+51,42,0.5,quality,Toothbrush battery dies overnight.,15
+52,43,0.3,billing,Charged twice for standing desk preorder.,15
+53,44,0.45,quality,Weighted blanket beads clump in one corner.,16
+54,45,0.7,inquiry,Can SparkCharge plug be used outdoors?,16
+55,46,0.55,support,Need tutorial video for smart pen pairing.,16
+56,47,0.2,defect,Bread maker kneading arm missing.,16
+57,48,0.25,quality,Ice maker makes loud rattling noise.,17
+58,49,0.35,shipping,Iron box looked previously opened.,17
+59,50,0.6,inquiry,Is jump rope length adjustable?,17
+60,51,0.5,quality,Herb kit soil was dry and clumpy.,17
+61,52,0.65,inquiry,Does night light have motion sensor?,18
+62,53,0.3,quality,Hiking pole locks slipping on steep trails.,18
+63,54,0.55,inquiry,Need cable length specification.,18
+64,55,0.5,quality,Swim goggles fog up quickly.,18
+65,56,0.4,defect,Speaker bluetooth drops connection randomly.,18
+66,57,0.45,quality,Blender lid doesn't seal tightly.,19
+67,58,0.6,support,Looking for ab roller workout plan.,19
+68,59,0.35,quality,Facial steamer reservoir stains easily.,19
+69,60,0.5,inquiry,How long should cold brew steep?,19
+70,5,0.15,complaint,Still waiting on purifier restock notification.,20
+71,6,0.4,quality,Weights arrived with minor scratches.,20
+72,7,0.5,inquiry,Need filter replacement frequency guidance.,20
+73,8,0.2,defect,Thermostat loses Wi-Fi daily.,21
+74,9,0.65,support,Want tips for cleaning yoga blocks.,21
+75,10,0.3,quality,Plate glaze chipped after first wash.,21
+76,11,0.55,inquiry,What grind size works best for press?,22
+77,12,0.35,quality,Pillow lost fluff after laundry.,22
+78,13,0.25,defect,Band heart rate wildly inaccurate.,22
+79,14,0.4,shipping,Fan arrived but missing front grill screws.,22
+80,15,0.45,quality,Solar lights not waterproof as advertised.,22
+81,16,0.5,support,Need filter replacement instructions.,23
+82,17,0.6,inquiry,Is mouse compatible with Mac OS Ventura?,23
+83,18,0.55,inquiry,Looking for larger water tank accessory.,23
+84,19,0.3,shipping,Cooler delivered without ice packs promised.,23
+85,20,0.35,quality,Power bank USB-C port loose.,24
+86,21,0.2,defect,Resistance band snapped mid-use.,24
+87,22,0.4,shipping,Kettle packaging soaked when delivered.,24
+88,23,0.35,complaint,Balance board color different from listing.,24
+89,24,0.6,support,Need lamp firmware update steps.,24
+90,25,0.55,shipping,Package left in rain soaked slippers.,25
+91,26,0.65,inquiry,Are glasses freezer safe?,25
+92,27,0.45,quality,Earbud case hinge feels flimsy.,25
+93,28,0.5,inquiry,Is backpack carry-on approved?,25
+94,29,0.35,quality,Blanket pilled after tumble dry.,26
+95,30,0.3,defect,Skillet coating bubbling.,26
+96,31,0.4,quality,Foam roller chemical smell persists.,26
+97,32,0.25,complaint,Robot vacuum missing side brush.,26
+98,33,0.7,inquiry,Need OSHA compliance info for ear plugs.,27
+99,34,0.2,defect,Juicer spout cracked out of box.,27
+100,35,0.6,inquiry,Will notebooks be back in dotted layout?,27
+101,36,0.3,quality,Heart monitor app crashes on Android.,27
+102,37,0.15,defect,Water cooler arrived without screws.,27
+103,38,0.45,shipping,Mirror package heavily scratched.,28
+104,39,0.5,support,Need stacking weight limits.,28
+105,40,0.2,complaint,Air conditioner louder than specs.,28
+106,41,0.55,inquiry,Suitcase warranty registration?,28
+107,42,0.4,quality,Toothbrush head bristles falling out.,28
+108,43,0.5,support,Standing desk motor calibration help.,29
+109,44,0.35,quality,Weighted blanket cover stitching uneven.,29
+110,45,0.6,inquiry,Need UL certification copy.,29
+111,46,0.5,support,How to replace pen cartridges?,29
+112,47,0.25,quality,Bread crust setting uneven bake.,30
+113,48,0.3,defect,Ice maker stopped ejecting cubes.,30
+114,49,0.45,quality,Iron steam function sputtering.,30
+115,50,0.6,inquiry,Jump rope compatible with kids?,30
+116,51,0.4,quality,Herb seeds didn't sprout.,30
+117,52,0.55,inquiry,Night light brightness adjustable?,30
+118,53,0.35,quality,Pole grips tearing.,31
+119,54,0.45,support,Need safety datasheet for cord.,31
+120,55,0.5,inquiry,Do goggles include extra straps?,31
+121,56,0.3,defect,Speaker battery won't hold charge.,31
+122,57,0.4,quality,Blender blades dull quickly.,31
+123,58,0.65,inquiry,Is ab roller good for hardwood floors?,32
+124,59,0.35,quality,Facial steamer emits plastic smell.,32
+125,60,0.55,support,Need recipe booklet PDF.,32

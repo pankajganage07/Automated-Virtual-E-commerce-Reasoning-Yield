@@ -92,6 +92,21 @@ class SupportTicket(Base):
     product: Mapped["Product | None"] = relationship("Product", back_populates="support_tickets")
 
 
+class Inventory(Base):
+    __tablename__ = "inventory"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[int] = mapped_column(
+        ForeignKey("products.id", ondelete="CASCADE"), nullable=False
+    )
+    warehouse_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    on_hand: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reserved: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reorder_point: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    incoming_qty: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_restocked: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class AgentMemory(Base):
     __tablename__ = "agent_memory"
 

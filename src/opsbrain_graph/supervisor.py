@@ -44,20 +44,22 @@ def generate_planning_prompt(agent_metadata: dict[str, AgentMetadata]) -> str:
         lines.append(f"- {meta.description}")
 
         if meta.capabilities:
-            lines.append("- Capabilities:")
+            lines.append("- Capabilities (use the name as 'mode' parameter):")
             for cap in meta.capabilities:
                 params_desc = ""
                 if cap.parameters:
                     params_list = [f"{k}: {v}" for k, v in cap.parameters.items()]
                     params_desc = f" (parameters: {'; '.join(params_list)})"
-                lines.append(f"  * {cap.name}: {cap.description}{params_desc}")
+                lines.append(f'  * mode="{cap.name}": {cap.description}{params_desc}')
+                if cap.example_queries:
+                    lines.append(f"    Examples: {'; '.join(cap.example_queries[:2])}")
 
         if meta.keywords:
-            lines.append(f"- Trigger keywords: {', '.join(meta.keywords[:5])}")
+            lines.append(f"- Trigger keywords: {', '.join(meta.keywords[:7])}")
 
         lines.append("")
 
-    # Add task assignment rules
+    # Add task assignment rules with comprehensive examples
     lines.extend(
         [
             "## Task Assignment Rules:",
@@ -67,28 +69,77 @@ def generate_planning_prompt(agent_metadata: dict[str, AgentMetadata]) -> str:
             "4. For product-related issues, consider both SALES and INVENTORY",
             "5. Be specific with parameters - extract numbers, time windows, and filters from the query",
             "6. Use agent keywords to help identify which agents are relevant",
-            "7. CRITICAL: Always specify the 'mode' parameter when an agent has multiple modes",
-            "   - For questions about 'top products', 'best sellers', use mode='top_products'",
-            "   - For questions about 'trends', 'performance', 'revenue over time', use mode='trends'",
+            "",
+            "## SLIMMED AGENT ARCHITECTURE:",
+            "Each specialized agent has LIMITED capabilities (2 core tools each).",
+            "For complex queries that don't fit core capabilities, the agent will return 'cannot_handle'",
+            "and the system will automatically route to DATA_ANALYST with HITL approval.",
+            "",
+            "## Agent Core Capabilities:",
+            "- SALES: summary, top_products (for period comparison, regional, channel → routes to analyst)",
+            "- INVENTORY: check_stock, low_stock_scan (for predictions, top-sellers stock → routes to analyst)",
+            "- MARKETING: campaign_spend, calculate_roas (for underperforming, comparison → routes to analyst)",
+            "- SUPPORT: sentiment_analysis, ticket_trends (for common issues, complaint comparison → routes to analyst)",
+            "- DATA_ANALYST: execute_sql - handles complex queries with HITL approval",
+            "- HISTORIAN: query - retrieves past incidents from memory",
+            "",
+            "## CRITICAL RULES FOR MODE SELECTION:",
+            "7. ALWAYS specify the 'mode' parameter - match it to the capability name",
+            "8. For simple 'sales summary', 'how did sales do' → mode='summary'",
+            "9. For 'top products', 'best sellers' → mode='top_products'",
+            "10. For 'low stock', 'out of stock', 'close to stockout' → mode='low_stock_scan'",
+            "11. For 'check stock for product X' → mode='check_stock' with product_ids",
+            "12. For 'campaign spend', 'ad spend' → mode='campaign_spend'",
+            "13. For 'ROAS', 'return on ad spend' → mode='calculate_roas'",
+            "14. For 'sentiment', 'how is support' → mode='sentiment_analysis'",
+            "15. For 'ticket trends', 'support trends' → mode='ticket_trends'",
+            "",
+            "## Complex Queries (Agent will auto-route to DATA_ANALYST):",
+            "- 'Compare yesterday to last week' → Try sales first, will route to analyst",
+            "- 'Underperforming campaigns' → Try marketing first, will route to analyst",
+            "- 'Common customer issues' → Try support first, will route to analyst",
+            "- 'Predict stockouts' → Try inventory first, will route to analyst",
+            "",
+            "## Cross-Domain Questions:",
+            "For questions that span multiple domains, assign multiple agents:",
+            "- 'Was the sales drop caused by inventory, marketing, or support issues?' → sales, inventory, marketing, support agents",
+            "- 'Show all contributing factors' → sales, inventory, marketing, support agents",
+            "- 'Correlate complaints with sales' → sales + support agents",
             "",
             "## Output Format:",
             "Return a JSON array of tasks. Each task must have:",
             "- agent: One of " + ", ".join(f'"{name}"' for name in sorted(agent_metadata.keys())),
             "- objective: Clear description of what the agent should accomplish",
-            "- parameters: Dict with mode, window_days, limit, product_ids, etc. ALWAYS include 'mode' for sales agent",
+            "- parameters: Dict with 'mode' (REQUIRED) and 'query' (pass original question), plus window_days, limit, product_ids, etc.",
             "- priority: 1 (highest) to 5 (lowest) - for execution ordering",
             "",
-            "Example for 'top products' question:",
-            "[",
-            '  {"agent": "sales", "objective": "Find top selling products", "parameters": {"mode": "top_products", "window_days": 7, "limit": 5}, "priority": 1}',
-            "]",
+            "## Examples:",
             "",
-            "Example for 'sales trends' question:",
+            "Question: 'What are the top selling products?'",
+            '[{"agent": "sales", "objective": "Find top selling products", "parameters": {"mode": "top_products", "query": "What are the top selling products?", "window_days": 7, "limit": 5}, "priority": 1}]',
+            "",
+            "Question: 'Compare yesterday sales to last week'",
+            '[{"agent": "sales", "objective": "Compare sales periods", "parameters": {"mode": "summary", "query": "Compare yesterday sales to last week"}, "priority": 1}]',
+            "",
+            "Question: 'Which products are close to stock-out?'",
+            '[{"agent": "inventory", "objective": "Scan for low stock products", "parameters": {"mode": "low_stock_scan", "query": "Which products are close to stock-out?"}, "priority": 1}]',
+            "",
+            "Question: 'What is our campaign ROAS?'",
+            '[{"agent": "marketing", "objective": "Calculate ROAS", "parameters": {"mode": "calculate_roas", "query": "What is our campaign ROAS?", "window_days": 7}, "priority": 1}]',
+            "",
+            "Question: 'What is customer sentiment?'",
+            '[{"agent": "support", "objective": "Analyze sentiment", "parameters": {"mode": "sentiment_analysis", "query": "What is customer sentiment?", "window_days": 7}, "priority": 1}]',
+            "",
+            "Question: 'Summarize yesterday business health'",
             "[",
-            '  {"agent": "sales", "objective": "Analyze revenue trends", "parameters": {"mode": "trends", "window_days": 7}, "priority": 1}',
+            '  {"agent": "sales", "objective": "Get sales summary", "parameters": {"mode": "summary", "query": "Summarize yesterday business health", "window_days": 1}, "priority": 1},',
+            '  {"agent": "inventory", "objective": "Check for stock issues", "parameters": {"mode": "low_stock_scan", "query": "Summarize yesterday business health"}, "priority": 1},',
+            '  {"agent": "marketing", "objective": "Get campaign spend", "parameters": {"mode": "campaign_spend", "query": "Summarize yesterday business health"}, "priority": 1},',
+            '  {"agent": "support", "objective": "Analyze support sentiment", "parameters": {"mode": "sentiment_analysis", "query": "Summarize yesterday business health", "window_days": 1}, "priority": 1}',
             "]",
             "",
             "IMPORTANT: Return ONLY the JSON array, no additional text or markdown.",
+            "IMPORTANT: Always include 'query' parameter with the original user question for agent fallback routing.",
         ]
     )
 
@@ -523,6 +574,25 @@ class Supervisor:
             if "recommendations" not in state:
                 state["recommendations"] = []
             state["recommendations"].extend(result.recommendations)
+        elif result.status == "cannot_handle":
+            # Agent indicates it cannot handle this query - needs DataAnalyst routing
+            logger.info(
+                "Agent %s returned cannot_handle, will route to data_analyst",
+                agent_name,
+            )
+            if "cannot_handle_agents" not in state:
+                state["cannot_handle_agents"] = []
+            state["cannot_handle_agents"].append(
+                {
+                    "agent": agent_name,
+                    "query": result.findings.get("query", state.get("user_query", "")),
+                    "reason": result.findings.get("reason", "Requires complex analysis"),
+                }
+            )
+            # Also store insights for transparency
+            if "agent_insights" not in state:
+                state["agent_insights"] = {}
+            state["agent_insights"][agent_name] = result.insights
         else:
             if "system_warnings" not in state:
                 state["system_warnings"] = []
@@ -546,6 +616,26 @@ class Supervisor:
         battle_plan = state.get("battle_plan", [])
         agent_findings = state.get("agent_findings", {})
         system_warnings = state.get("system_warnings", [])
+        cannot_handle_agents = state.get("cannot_handle_agents", [])
+
+        # Check for agents that returned cannot_handle - route to data_analyst
+        if cannot_handle_agents:
+            # Check if data_analyst already ran
+            if "data_analyst" in agent_findings:
+                # Data analyst already provided results, don't replan
+                logger.info("Data analyst already ran, proceeding to synthesis")
+                state["needs_replan"] = False
+                return True
+
+            # Need to route to data_analyst for complex queries
+            state["needs_replan"] = True
+            agent_names = [c["agent"] for c in cannot_handle_agents]
+            state["replan_reason"] = (
+                f"Agents {agent_names} cannot handle query, routing to data_analyst"
+            )
+            state["route_to_analyst"] = True
+            logger.info("Re-planning needed: routing to data_analyst for complex query")
+            return False
 
         # Check for failed agents that were critical
         failed_agents = set()
@@ -609,11 +699,41 @@ class Supervisor:
         Create a new plan based on what failed or returned empty.
 
         This considers the previous failures and tries alternative approaches.
+        Handles cannot_handle routing to data_analyst specially.
         """
         replan_count = state.get("replan_count", 0)
         state["replan_count"] = replan_count + 1
 
         replan_reason = state.get("replan_reason", "Unknown reason")
+
+        # Check if we need to route to data_analyst due to cannot_handle
+        if state.get("route_to_analyst"):
+            logger.info("Routing to data_analyst for complex query")
+            cannot_handle_agents = state.get("cannot_handle_agents", [])
+            original_query = state.get("user_query", "")
+
+            # Build query context from cannot_handle agents
+            query_context = original_query
+            if cannot_handle_agents:
+                reasons = [c.get("reason", "") for c in cannot_handle_agents]
+                query_context = (
+                    f"{original_query} (Note: specialized agents indicated: {'; '.join(reasons)})"
+                )
+
+            # Create task for data_analyst with the original query
+            task = AgentTask(
+                agent="data_analyst",
+                objective=f"Generate custom SQL to answer: {original_query}",
+                parameters={
+                    "mode": "analyze",
+                    "query": original_query,
+                },
+                result_slot="agent_findings.data_analyst",
+            )
+            state["battle_plan"] = [task]
+            state["route_to_analyst"] = False  # Clear the flag
+            return [task]
+
         failed_agents = set()
 
         # Identify failed agents from warnings
