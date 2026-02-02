@@ -1,17 +1,8 @@
-"""
-Marketing Agent - Slimmed architecture (2 core capabilities).
-
-Capabilities:
-1. campaign_spend - Get campaign spend and conversion metrics
-2. calculate_roas - Calculate Return on Ad Spend
-
-Complex queries (underperforming, comparison) route to DataAnalystAgent.
-"""
+"""Marketing Agent - Evaluates campaign spend and ROAS."""
 
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
 from opsbrain_graph.tools import GetCampaignSpendRequest
@@ -29,40 +20,16 @@ from .base_agent import (
 logger = logging.getLogger("agent.marketing")
 
 
-# Query patterns that this agent CANNOT handle (require DataAnalystAgent)
-COMPLEX_QUERY_PATTERNS = [
-    r"underperform",
-    r"poor.*(campaign|roas)",
-    r"zero.*conversion",
-    r"compare.*(campaign|performance|period)",
-    r"yesterday.*vs.*week",
-    r"campaign.*trend",
-    r"performance.*drop",
-    r"performance.*improve",
-    r"campaign.*comparison",
-    r"historical.*campaign",
-    r"best.*campaign",
-    r"worst.*campaign",
-    r"rank.*campaign",
-    r"top.*performer",
-    r"bottom.*performer",
-]
-
-
 class MarketingAgent(BaseAgent):
-    """
-    Marketing Agent with 2 core capabilities.
-
-    Complex queries trigger cannot_handle for routing to DataAnalystAgent.
-    """
+    """Marketing Agent with 4 core capabilities."""
 
     name = "marketing"
-    description = "Evaluates campaign spend and ROAS."
+    description = "Evaluates campaign spend, ROAS, and manages campaign status."
 
     metadata = AgentMetadata(
         name="marketing",
         display_name="MARKETING",
-        description="Evaluates marketing campaign spend and calculates ROAS. For complex analytics (underperforming, comparisons), use data analyst.",
+        description="Evaluates marketing campaign spend, calculates ROAS, and manages campaign status (pause/resume).",
         capabilities=[
             AgentCapability(
                 name="campaign_spend",
@@ -90,6 +57,33 @@ class MarketingAgent(BaseAgent):
                     "Campaign efficiency metrics",
                 ],
             ),
+            AgentCapability(
+                name="pause_campaign",
+                description="Pause a marketing campaign by name or ID",
+                parameters={
+                    "campaign_name": "Name of the campaign to pause",
+                    "campaign_id": "ID of the campaign to pause (optional if name provided)",
+                },
+                example_queries=[
+                    "Pause the campaign Spring Hydration Push",
+                    "Can you pause campaign 5?",
+                    "Stop the Summer Sale campaign",
+                    "Pause this campaign",
+                ],
+            ),
+            AgentCapability(
+                name="resume_campaign",
+                description="Resume a paused marketing campaign by name or ID",
+                parameters={
+                    "campaign_name": "Name of the campaign to resume",
+                    "campaign_id": "ID of the campaign to resume (optional if name provided)",
+                },
+                example_queries=[
+                    "Resume the campaign Spring Hydration Push",
+                    "Can you resume campaign 5?",
+                    "Reactivate the Summer Sale campaign",
+                ],
+            ),
         ],
         keywords=[
             "campaign",
@@ -99,46 +93,24 @@ class MarketingAgent(BaseAgent):
             "spend",
             "advertising",
             "budget",
+            "pause",
+            "resume",
+            "stop",
         ],
-        priority_boost=["wasted spend", "low roas"],
+        priority_boost=["wasted spend", "low roas", "pause campaign", "stop campaign"],
     )
 
-    def _is_complex_query(self, query: str) -> bool:
-        """Check if query requires complex analysis."""
-        query_lower = query.lower()
-        for pattern in COMPLEX_QUERY_PATTERNS:
-            if re.search(pattern, query_lower):
-                return True
-        return False
-
-    def _cannot_handle(self, query: str) -> AgentResult:
-        """Return cannot_handle status for supervisor to route to analyst."""
-        return AgentResult(
-            status="cannot_handle",
-            findings={
-                "query": query,
-                "reason": "This query requires complex marketing analysis (comparison, ranking, underperforming) that needs custom SQL.",
-                "suggested_agent": "data_analyst",
-            },
-            insights=[
-                "This marketing query requires advanced analytics beyond my core capabilities.",
-                "Routing to Data Analyst for custom SQL generation with HITL approval.",
-            ],
-            recommendations=[],
-        )
-
     async def run(self, task: AgentTask, context: AgentRunContext) -> AgentResult:
+        """Execute the marketing agent task based on mode."""
         params = task.parameters
-        query = params.get("query", "")
         mode = params.get("mode", "campaign_spend")
-
-        # Check for complex queries first
-        if self._is_complex_query(query):
-            logger.info("marketing agent: complex query detected, returning cannot_handle")
-            return self._cannot_handle(query)
 
         if mode == "calculate_roas":
             return await self._run_calculate_roas(params)
+        elif mode == "pause_campaign":
+            return await self._run_pause_campaign(params)
+        elif mode == "resume_campaign":
+            return await self._run_resume_campaign(params)
         else:
             return await self._run_campaign_spend(params)
 
@@ -230,5 +202,88 @@ class MarketingAgent(BaseAgent):
                         requires_approval=True,
                     )
                 )
+
+        return self.success(findings=findings, insights=insights, recommendations=recommendations)
+
+    async def _run_pause_campaign(self, params: dict[str, Any]) -> AgentResult:
+        """Pause a campaign by name or ID."""
+        return await self._run_campaign_status_change(params, target_status="paused")
+
+    async def _run_resume_campaign(self, params: dict[str, Any]) -> AgentResult:
+        """Resume a paused campaign by name or ID."""
+        return await self._run_campaign_status_change(params, target_status="active")
+
+    async def _run_campaign_status_change(
+        self, params: dict[str, Any], target_status: str
+    ) -> AgentResult:
+        """Handle campaign status change (pause/resume) by name or ID."""
+        campaign_name = params.get("campaign_name")
+        campaign_id = params.get("campaign_id")
+        action_word = "Pause" if target_status == "paused" else "Resume"
+        action_type = "pause_campaign" if target_status == "paused" else "resume_campaign"
+
+        # Get all campaigns to find by name or ID
+        try:
+            spend_resp = await self.tools.marketing.get_campaign_spend(
+                GetCampaignSpendRequest(campaign_ids=None, status=None)
+            )
+        except Exception as exc:
+            logger.exception("marketing agent (campaign status change) failed: %s", exc)
+            return self.failure(exc)
+
+        # Find the campaign
+        campaign = None
+        if campaign_id:
+            campaign = next((c for c in spend_resp.campaigns if c.campaign_id == campaign_id), None)
+        elif campaign_name:
+            # Case-insensitive partial match
+            campaign = next(
+                (c for c in spend_resp.campaigns if campaign_name.lower() in c.name.lower()),
+                None,
+            )
+
+        if campaign is None:
+            search_term = f"ID {campaign_id}" if campaign_id else f"'{campaign_name}'"
+            return self.success(
+                findings={"error": f"Campaign {search_term} not found"},
+                insights=[f"❌ Could not find campaign matching {search_term}"],
+                recommendations=[],
+            )
+
+        # Check if already in target status
+        if campaign.status == target_status:
+            status_word = "paused" if target_status == "paused" else "active"
+            return self.success(
+                findings={
+                    "campaign_id": campaign.campaign_id,
+                    "campaign_name": campaign.name,
+                    "status": campaign.status,
+                },
+                insights=[
+                    f"ℹ️ Campaign **{campaign.name}** (ID: {campaign.campaign_id}) is already {status_word}."
+                ],
+                recommendations=[],
+            )
+
+        # Create status change recommendation
+        findings = {
+            "campaign_id": campaign.campaign_id,
+            "campaign_name": campaign.name,
+            "current_status": campaign.status,
+            "target_status": target_status,
+        }
+        insights = [
+            f"📢 {action_word} request for campaign **{campaign.name}** (ID: {campaign.campaign_id})",
+            f"   Current status: {campaign.status}",
+            f"   Spend: ${campaign.spend:,.2f} | Clicks: {campaign.clicks} | Conversions: {campaign.conversions}",
+        ]
+        recommendations = [
+            AgentRecommendation(
+                action_type=action_type,
+                payload={"campaign_id": campaign.campaign_id},
+                reasoning=f"User requested to {action_word.lower()} campaign {campaign.name}",
+                requires_approval=True,
+            )
+        ]
 
         return self.success(findings=findings, insights=insights, recommendations=recommendations)

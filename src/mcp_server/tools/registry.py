@@ -16,11 +16,16 @@ from .sql_tool import ExecuteSQLTool
 
 # Slimmed domain tools (2 per domain)
 from .sales_tools import GetSalesSummaryTool, GetTopProductsTool
-from .inventory_tool import GetInventoryStatusTool, GetLowStockProductsTool
+from .inventory_tool import GetInventoryStatusTool, GetLowStockProductsTool, SearchProductsTool
 from .marketing_tool import GetCampaignSpendTool, CalculateROASTool
 from .support_tool import GetSupportSentimentTool, GetTicketTrendsTool
 
-from .memory_tool import QueryMemoryTool, SaveMemoryTool, ListIncidentsTool
+from .memory_tool import (
+    QueryMemoryTool,
+    SaveMemoryTool,
+    ListIncidentsTool,
+    QueryMemoryWithActionsTool,
+)
 from .action_tools import (
     UpdateInventoryTool,
     UpdateCampaignStatusTool,
@@ -36,9 +41,10 @@ TOOL_REGISTRY: Dict[str, BaseTool] = {
     # Query tools - Sales (2 core)
     GetSalesSummaryTool.name: GetSalesSummaryTool(),
     GetTopProductsTool.name: GetTopProductsTool(),
-    # Query tools - Inventory (2 core)
+    # Query tools - Inventory (3 core)
     GetInventoryStatusTool.name: GetInventoryStatusTool(),
     GetLowStockProductsTool.name: GetLowStockProductsTool(),
+    SearchProductsTool.name: SearchProductsTool(),
     # Query tools - Marketing (2 core)
     GetCampaignSpendTool.name: GetCampaignSpendTool(),
     CalculateROASTool.name: CalculateROASTool(),
@@ -47,6 +53,7 @@ TOOL_REGISTRY: Dict[str, BaseTool] = {
     GetTicketTrendsTool.name: GetTicketTrendsTool(),
     # Memory tools
     QueryMemoryTool.name: QueryMemoryTool(),
+    QueryMemoryWithActionsTool.name: QueryMemoryWithActionsTool(),
     SaveMemoryTool.name: SaveMemoryTool(),
     ListIncidentsTool.name: ListIncidentsTool(),
     # Action tools (for HITL execution)

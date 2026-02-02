@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from opsbrain_graph.memory import MemoryIncident
+from opsbrain_graph.memory import MemoryIncident, MemoryHitWithActions
 from .base_agent import (
     AgentCapability,
     AgentMetadata,
@@ -113,14 +113,20 @@ class HistorianAgent(BaseAgent):
         if matches:
             insights.append(f"📚 Found {len(matches)} similar past incidents:")
             for i, match in enumerate(matches, 1):
-                summary = match.get("summary", "No summary")[:100]
-                similarity = match.get("similarity", 0)
-                insights.append(f"  {i}. (Similarity: {similarity:.0%}) {summary}...")
+                summary = match.get("incident_summary", "No summary")[:100]
+                score = match.get("score", 0)
+                insights.append(f"  {i}. (Similarity: {score:.0%}) {summary}...")
 
                 # Include root cause if available
                 root_cause = match.get("root_cause")
                 if root_cause:
                     insights.append(f"     Root cause: {root_cause[:80]}...")
+
+                # Show if actions were taken
+                if match.get("actions_approved"):
+                    insights.append(
+                        f"     Actions approved: {', '.join(match['actions_approved'][:3])}"
+                    )
         else:
             insights.append("📚 No similar incidents found in memory.")
 
@@ -134,55 +140,84 @@ class HistorianAgent(BaseAgent):
         k = params.get("k", 5)
 
         try:
-            hits = await self.memory_service.query_similar_incidents(query, k)
+            # Use the new action-focused query
+            hits = await self.memory_service.query_incidents_with_actions(
+                query, k=k, only_with_actions=True
+            )
         except Exception as exc:
             logger.exception("historian agent (past_actions) failed: %s", exc)
             return self.failure(exc)
 
-        matches = [hit.to_dict() for hit in hits]
-
-        # Extract actions and outcomes
-        actions_taken: list[dict[str, Any]] = []
-        for match in matches:
-            action = match.get("action_taken")
-            outcome = match.get("outcome")
-            if action:
-                actions_taken.append(
-                    {
-                        "incident_summary": match.get("summary", "Unknown")[:100],
-                        "action_taken": action,
-                        "outcome": outcome or "Unknown",
-                        "similarity": match.get("similarity", 0),
-                    }
-                )
+        # Format the results with action history
+        past_incidents: list[dict[str, Any]] = []
+        for hit in hits:
+            incident_info = {
+                "incident_summary": hit.incident_summary[:200],
+                "root_cause": hit.root_cause[:150] if hit.root_cause else None,
+                "similarity": hit.similarity_score,
+                "when": hit.created_at.strftime("%Y-%m-%d") if hit.created_at else "Unknown",
+                "actions_proposed": hit.action_history.proposed,
+                "actions_approved": hit.action_history.approved,
+                "actions_rejected": hit.action_history.rejected,
+                "action_summary": hit.action_history.summary,
+                "outcome": hit.outcome,
+                "confidence": hit.confidence_score,
+            }
+            past_incidents.append(incident_info)
 
         findings: dict[str, Any] = {
             "query": query,
-            "total_matches": len(matches),
-            "actions_found": len(actions_taken),
-            "past_actions": actions_taken,
+            "total_matches": len(hits),
+            "past_incidents": past_incidents,
         }
         insights: list[str] = []
 
-        if actions_taken:
-            insights.append(f"📜 Found {len(actions_taken)} past actions from similar incidents:")
-            for i, action_info in enumerate(actions_taken, 1):
-                insights.append(f"  {i}. Incident: {action_info['incident_summary']}...")
-                insights.append(f"     Action: {action_info['action_taken']}")
-                insights.append(f"     Outcome: {action_info['outcome']}")
+        if past_incidents:
+            insights.append(f"📜 Found {len(past_incidents)} similar past incidents with actions:")
+            for i, incident in enumerate(past_incidents, 1):
+                insights.append(
+                    f"\n**{i}. {incident['when']}** (Similarity: {incident['similarity']:.0%})"
+                )
+                insights.append(f"   Situation: {incident['incident_summary']}...")
 
-            # Analyze which actions had positive outcomes
-            positive_outcomes = [
-                a
-                for a in actions_taken
-                if "success" in str(a.get("outcome", "")).lower()
-                or "resolved" in str(a.get("outcome", "")).lower()
-                or "improved" in str(a.get("outcome", "")).lower()
-            ]
-            if positive_outcomes:
-                insights.append(f"✅ {len(positive_outcomes)} actions had positive outcomes")
+                if incident["root_cause"]:
+                    insights.append(f"   Root cause: {incident['root_cause']}...")
+
+                # Show action history
+                if incident["actions_approved"]:
+                    insights.append(
+                        f"   ✅ Approved actions: {', '.join(incident['actions_approved'])}"
+                    )
+                if incident["actions_rejected"]:
+                    insights.append(
+                        f"   ❌ Rejected actions: {', '.join(incident['actions_rejected'])}"
+                    )
+                if incident["action_summary"] and not incident["actions_approved"]:
+                    insights.append(f"   Actions taken: {incident['action_summary'][:100]}...")
+
+                if incident["outcome"]:
+                    insights.append(f"   Outcome: {incident['outcome']}")
+
+            # Analyze what worked
+            all_approved = []
+            all_rejected = []
+            for inc in past_incidents:
+                all_approved.extend(inc.get("actions_approved") or [])
+                all_rejected.extend(inc.get("actions_rejected") or [])
+
+            if all_approved:
+                # Count occurrences
+                from collections import Counter
+
+                approved_counts = Counter(all_approved)
+                top_actions = approved_counts.most_common(3)
+                if top_actions:
+                    insights.append(
+                        f"\n📊 **Most commonly approved actions:** {', '.join(f'{a}({c}x)' for a,c in top_actions)}"
+                    )
         else:
-            insights.append("📜 No past actions found for similar incidents.")
+            insights.append("📜 No similar incidents with action history found.")
+            insights.append("   This may be the first time this type of situation has occurred.")
 
         return self.success(findings=findings, insights=insights)
 

@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from config import Settings
 from opsbrain_graph.agents import AgentResult, AgentTask, AgentRecommendation, AgentMetadata
 from opsbrain_graph.state import GraphState, DiagnosisSummary, PendingActionProposal
+from prompts import get_prompt, render_prompt
 from utils.llm import get_llm
 
 if TYPE_CHECKING:
@@ -29,190 +30,43 @@ def generate_planning_prompt(agent_metadata: dict[str, AgentMetadata]) -> str:
     Generate the planning system prompt dynamically from agent metadata.
 
     This allows the prompt to stay in sync with actual agent capabilities.
+    Uses templates from the centralized prompts folder.
     """
-    lines = [
-        "You are an AI Operations Supervisor for an e-commerce business.",
-        "Your job is to analyze the user's question and create a task plan by assigning work to specialist agents.",
-        "",
-        "## Available Agents and Their Capabilities:",
-        "",
-    ]
+    # Load template sections from centralized prompts
+    header = get_prompt("planning.system.header")
+    rules = get_prompt("planning.system.rules")
+    examples = get_prompt("planning.system.examples")
 
-    # Add each agent's metadata
+    # Build agent sections
+    agent_lines = []
     for idx, (name, meta) in enumerate(sorted(agent_metadata.items()), 1):
-        lines.append(f"### {idx}. {meta.display_name} Agent")
-        lines.append(f"- {meta.description}")
+        agent_lines.append(f"### {idx}. {meta.display_name} Agent")
+        agent_lines.append(f"- {meta.description}")
 
         if meta.capabilities:
-            lines.append("- Capabilities (use the name as 'mode' parameter):")
+            agent_lines.append("- Capabilities (use the name as 'mode' parameter):")
             for cap in meta.capabilities:
                 params_desc = ""
                 if cap.parameters:
                     params_list = [f"{k}: {v}" for k, v in cap.parameters.items()]
                     params_desc = f" (parameters: {'; '.join(params_list)})"
-                lines.append(f'  * mode="{cap.name}": {cap.description}{params_desc}')
+                agent_lines.append(f'  * mode="{cap.name}": {cap.description}{params_desc}')
                 if cap.example_queries:
-                    lines.append(f"    Examples: {'; '.join(cap.example_queries[:2])}")
+                    agent_lines.append(f"    Examples: {'; '.join(cap.example_queries[:2])}")
 
         if meta.keywords:
-            lines.append(f"- Trigger keywords: {', '.join(meta.keywords[:7])}")
+            agent_lines.append(f"- Trigger keywords: {', '.join(meta.keywords[:7])}")
 
-        lines.append("")
+        agent_lines.append("")
 
-    # Add task assignment rules with comprehensive examples
-    lines.extend(
-        [
-            "## Task Assignment Rules:",
-            "1. Assign the MINIMUM number of agents needed to answer the question",
-            "2. Multiple agents can work in PARALLEL if their tasks are independent",
-            "3. For 'why' questions, include the HISTORIAN agent",
-            "4. For product-related issues, consider both SALES and INVENTORY",
-            "5. Be specific with parameters - extract numbers, time windows, and filters from the query",
-            "6. Use agent keywords to help identify which agents are relevant",
-            "",
-            "## SLIMMED AGENT ARCHITECTURE:",
-            "Each specialized agent has LIMITED capabilities (2 core tools each).",
-            "For complex queries that don't fit core capabilities, the agent will return 'cannot_handle'",
-            "and the system will automatically route to DATA_ANALYST with HITL approval.",
-            "",
-            "## Agent Core Capabilities:",
-            "- SALES: summary, top_products (for period comparison, regional, channel → routes to analyst)",
-            "- INVENTORY: check_stock, low_stock_scan (for predictions, top-sellers stock → routes to analyst)",
-            "- MARKETING: campaign_spend, calculate_roas (for underperforming, comparison → routes to analyst)",
-            "- SUPPORT: sentiment_analysis, ticket_trends (for common issues, complaint comparison → routes to analyst)",
-            "- DATA_ANALYST: execute_sql - handles complex queries with HITL approval",
-            "- HISTORIAN: query - retrieves past incidents from memory",
-            "",
-            "## CRITICAL RULES FOR MODE SELECTION:",
-            "7. ALWAYS specify the 'mode' parameter - match it to the capability name",
-            "8. For simple 'sales summary', 'how did sales do' → mode='summary'",
-            "9. For 'top products', 'best sellers' → mode='top_products'",
-            "10. For 'low stock', 'out of stock', 'close to stockout' → mode='low_stock_scan'",
-            "11. For 'check stock for product X' → mode='check_stock' with product_ids",
-            "12. For 'campaign spend', 'ad spend' → mode='campaign_spend'",
-            "13. For 'ROAS', 'return on ad spend' → mode='calculate_roas'",
-            "14. For 'sentiment', 'how is support' → mode='sentiment_analysis'",
-            "15. For 'ticket trends', 'support trends' → mode='ticket_trends'",
-            "",
-            "## Complex Queries (Agent will auto-route to DATA_ANALYST):",
-            "- 'Compare yesterday to last week' → Try sales first, will route to analyst",
-            "- 'Underperforming campaigns' → Try marketing first, will route to analyst",
-            "- 'Common customer issues' → Try support first, will route to analyst",
-            "- 'Predict stockouts' → Try inventory first, will route to analyst",
-            "",
-            "## Cross-Domain Questions:",
-            "For questions that span multiple domains, assign multiple agents:",
-            "- 'Was the sales drop caused by inventory, marketing, or support issues?' → sales, inventory, marketing, support agents",
-            "- 'Show all contributing factors' → sales, inventory, marketing, support agents",
-            "- 'Correlate complaints with sales' → sales + support agents",
-            "",
-            "## Output Format:",
-            "Return a JSON array of tasks. Each task must have:",
-            "- agent: One of " + ", ".join(f'"{name}"' for name in sorted(agent_metadata.keys())),
-            "- objective: Clear description of what the agent should accomplish",
-            "- parameters: Dict with 'mode' (REQUIRED) and 'query' (pass original question), plus window_days, limit, product_ids, etc.",
-            "- priority: 1 (highest) to 5 (lowest) - for execution ordering",
-            "",
-            "## Examples:",
-            "",
-            "Question: 'What are the top selling products?'",
-            '[{"agent": "sales", "objective": "Find top selling products", "parameters": {"mode": "top_products", "query": "What are the top selling products?", "window_days": 7, "limit": 5}, "priority": 1}]',
-            "",
-            "Question: 'Compare yesterday sales to last week'",
-            '[{"agent": "sales", "objective": "Compare sales periods", "parameters": {"mode": "summary", "query": "Compare yesterday sales to last week"}, "priority": 1}]',
-            "",
-            "Question: 'Which products are close to stock-out?'",
-            '[{"agent": "inventory", "objective": "Scan for low stock products", "parameters": {"mode": "low_stock_scan", "query": "Which products are close to stock-out?"}, "priority": 1}]',
-            "",
-            "Question: 'What is our campaign ROAS?'",
-            '[{"agent": "marketing", "objective": "Calculate ROAS", "parameters": {"mode": "calculate_roas", "query": "What is our campaign ROAS?", "window_days": 7}, "priority": 1}]',
-            "",
-            "Question: 'What is customer sentiment?'",
-            '[{"agent": "support", "objective": "Analyze sentiment", "parameters": {"mode": "sentiment_analysis", "query": "What is customer sentiment?", "window_days": 7}, "priority": 1}]',
-            "",
-            "Question: 'Summarize yesterday business health'",
-            "[",
-            '  {"agent": "sales", "objective": "Get sales summary", "parameters": {"mode": "summary", "query": "Summarize yesterday business health", "window_days": 1}, "priority": 1},',
-            '  {"agent": "inventory", "objective": "Check for stock issues", "parameters": {"mode": "low_stock_scan", "query": "Summarize yesterday business health"}, "priority": 1},',
-            '  {"agent": "marketing", "objective": "Get campaign spend", "parameters": {"mode": "campaign_spend", "query": "Summarize yesterday business health"}, "priority": 1},',
-            '  {"agent": "support", "objective": "Analyze support sentiment", "parameters": {"mode": "sentiment_analysis", "query": "Summarize yesterday business health", "window_days": 1}, "priority": 1}',
-            "]",
-            "",
-            "IMPORTANT: Return ONLY the JSON array, no additional text or markdown.",
-            "IMPORTANT: Always include 'query' parameter with the original user question for agent fallback routing.",
-        ]
-    )
+    # Build agent names list for output format
+    agent_names = ", ".join(f'"{name}"' for name in sorted(agent_metadata.keys()))
+    output_format = render_prompt("planning.system.output_format", agent_names=agent_names)
 
-    return "\n".join(lines)
+    # Combine all sections
+    full_prompt = header + "\n".join(agent_lines) + "\n" + rules + output_format + examples
 
-
-# =============================================================================
-# Fallback static prompt (used if no agents registered)
-# =============================================================================
-
-PLANNING_SYSTEM_PROMPT = """You are an AI Operations Supervisor for an e-commerce business.
-Your job is to analyze the user's question and create a task plan by assigning work to specialist agents.
-
-## Available Agents and Their Capabilities:
-
-### 1. SALES Agent
-- Analyzes revenue trends, sales performance, and detects anomalies
-- Can identify top-selling products
-- Capabilities:
-  * mode: "trends" - Analyze revenue trends over time (parameters: window_days, group_by)
-  * mode: "top_products" - Find best-selling products (parameters: window_days, limit)
-
-### 2. INVENTORY Agent
-- Monitors stock levels and identifies low-stock items
-- Capabilities:
-  * Check stock levels for specific products (parameters: product_ids)
-  * Detect items below low_stock_threshold
-
-### 3. MARKETING Agent
-- Evaluates campaign performance, ad spend, ROI
-- Capabilities:
-  * Analyze campaign spend efficiency (parameters: window_days)
-  * Track clicks, conversions, ROAS
-
-### 4. SUPPORT Agent
-- Analyzes customer support tickets and sentiment
-- Capabilities:
-  * Summarize support sentiment (parameters: window_days, product_id)
-  * Detect issue spikes and negative sentiment trends
-
-### 5. HISTORIAN Agent
-- Retrieves similar past incidents from memory for context
-- Use when user asks "why", wants explanations, or needs historical context
-- Capabilities:
-  * mode: "query" - Search past incidents (parameters: query)
-
-### 6. DATA_ANALYST Agent
-- Performs custom SQL queries for complex analysis
-- Use for questions that don't fit other agents
-- Capabilities:
-  * Execute analytical queries (parameters: query_type, filters)
-
-## Task Assignment Rules:
-1. Assign the MINIMUM number of agents needed to answer the question
-2. Multiple agents can work in PARALLEL if their tasks are independent
-3. For "why" questions, include the HISTORIAN agent
-4. For product-related issues, consider both SALES and INVENTORY
-5. Be specific with parameters - extract numbers, time windows, and filters from the query
-
-## Output Format:
-Return a JSON array of tasks. Each task must have:
-- agent: One of "sales", "inventory", "marketing", "support", "historian", "data_analyst"
-- objective: Clear description of what the agent should accomplish
-- parameters: Dict with mode, window_days, limit, product_ids, etc. as needed
-- priority: 1 (highest) to 5 (lowest) - for execution ordering
-
-Example:
-[
-  {"agent": "sales", "objective": "Find top 5 selling products", "parameters": {"mode": "top_products", "window_days": 7, "limit": 5}, "priority": 1},
-  {"agent": "inventory", "objective": "Check stock for top sellers", "parameters": {"product_ids": []}, "priority": 2}
-]
-
-IMPORTANT: Return ONLY the JSON array, no additional text or markdown."""
+    return full_prompt
 
 
 # =============================================================================
@@ -238,20 +92,6 @@ class TaskPlan(BaseModel):
 
     tasks: list[PlannedTask] = Field(default_factory=list)
     reasoning: str = Field(default="", description="Brief explanation of the plan")
-
-
-SYNTHESIS_SYSTEM_PROMPT = """You are an AI Operations Analyst for an e-commerce business. 
-Your job is to analyze data from various agents and provide clear, actionable insights.
-
-Based on the collected findings and insights from specialist agents, provide:
-1. A clear, concise answer to the user's question
-2. Key findings summarized in plain language
-3. Recommended actions if any issues are detected
-
-Be specific with numbers and percentages. If there's a problem, explain potential causes.
-If you don't have enough data to answer, say so clearly.
-
-Format your response in a clear, professional manner."""
 
 
 @dataclass
@@ -284,16 +124,10 @@ class Supervisor:
 
     @property
     def planning_prompt(self) -> str:
-        """Get the planning prompt, generating from metadata if available."""
+        """Get the planning prompt, generating from metadata."""
         if self._planning_prompt is None:
-            if self._agent_metadata:
-                self._planning_prompt = generate_planning_prompt(self._agent_metadata)
-                logger.info(
-                    "Generated dynamic planning prompt from %d agents", len(self._agent_metadata)
-                )
-            else:
-                self._planning_prompt = PLANNING_SYSTEM_PROMPT
-                logger.info("Using static fallback planning prompt")
+            self._planning_prompt = generate_planning_prompt(self._agent_metadata)
+            logger.info("Generated planning prompt from %d agents", len(self._agent_metadata))
         return self._planning_prompt
 
     @property
@@ -334,17 +168,7 @@ class Supervisor:
         Returns a list of AgentTask objects to be executed.
         """
         query = state["user_query"]
-
-        try:
-            tasks = await self._llm_plan(query, state)
-            if tasks:
-                state["battle_plan"] = tasks
-                return tasks
-        except Exception as exc:
-            logger.warning("LLM planning failed, falling back to keyword matching: %s", exc)
-
-        # Fallback to keyword-based planning if LLM fails
-        tasks = self._keyword_plan(state)
+        tasks = await self._llm_plan(query, state)
         state["battle_plan"] = tasks
         return tasks
 
@@ -455,110 +279,13 @@ class Supervisor:
         tasks.sort(key=lambda x: x[0])
         return [t for _, t in tasks]
 
-    def _keyword_plan(self, state: GraphState) -> list[AgentTask]:
-        """Fallback keyword-based planning when LLM is unavailable."""
-        query = state["user_query"].lower()
-        tasks: list[AgentTask] = []
-
-        # Top products query (must check before general sales)
-        if any(kw in query for kw in ("top", "best", "highest", "most sold", "best selling")):
-            if any(kw in query for kw in ("product", "item", "sku", "selling")):
-                limit = 5  # default
-                import re
-
-                match = re.search(r"top\s*(\d+)", query)
-                if match:
-                    limit = int(match.group(1))
-                tasks.append(
-                    AgentTask(
-                        agent="sales",
-                        objective="Find top selling products.",
-                        parameters={"mode": "top_products", "window_days": 7, "limit": limit},
-                        result_slot="agent_findings.sales",
-                    )
-                )
-
-        # Sales-related queries (general trends)
-        if not tasks and any(
-            kw in query for kw in ("sale", "revenue", "drop", "trend", "income", "earning", "money")
-        ):
-            tasks.append(
-                AgentTask(
-                    agent="sales",
-                    objective="Analyze revenue trends and detect anomalies.",
-                    parameters={"mode": "trends", "window_days": 7, "group_by": "day"},
-                    result_slot="agent_findings.sales",
-                )
-            )
-
-        # Inventory-related queries
-        if any(kw in query for kw in ("stock", "inventory", "out of stock", "restock", "supply")):
-            tasks.append(
-                AgentTask(
-                    agent="inventory",
-                    objective="Check stock levels for key products.",
-                    parameters={
-                        "product_ids": state.get("metadata", {}).get("focus_product_ids", [1, 2, 3])
-                    },
-                    result_slot="agent_findings.inventory",
-                )
-            )
-
-        # Marketing-related queries
-        if any(kw in query for kw in ("campaign", "ad", "marketing", "roas", "spend", "promotion")):
-            tasks.append(
-                AgentTask(
-                    agent="marketing",
-                    objective="Evaluate campaign spend efficiency.",
-                    parameters={"window_days": 7},
-                    result_slot="agent_findings.marketing",
-                )
-            )
-
-        # Support-related queries
-        if any(
-            kw in query
-            for kw in ("ticket", "support", "sentiment", "complaint", "customer", "issue")
-        ):
-            tasks.append(
-                AgentTask(
-                    agent="support",
-                    objective="Summarize support sentiment and issue spikes.",
-                    parameters={"window_days": 7},
-                    result_slot="agent_findings.support",
-                )
-            )
-
-        # Always include historian for context on "why" questions
-        if any(kw in query for kw in ("why", "reason", "cause", "explain", "happened")):
-            tasks.append(
-                AgentTask(
-                    agent="historian",
-                    objective="Retrieve similar past incidents for context.",
-                    parameters={"mode": "query", "query": state["user_query"]},
-                    result_slot="memory_context",
-                )
-            )
-
-        # Default: if no specific agent matched, use sales as general check
-        if not tasks:
-            tasks.append(
-                AgentTask(
-                    agent="sales",
-                    objective="General sales health check.",
-                    parameters={"window_days": 7, "group_by": "day"},
-                    result_slot="agent_findings.sales",
-                )
-            )
-
-        return tasks
-
     def incorporate_agent_result(
         self,
         state: GraphState,
         agent_name: str,
         result: AgentResult,
     ) -> None:
+        """Incorporate agent result into state."""
         if result.status == "success":
             # Store findings
             if "agent_findings" not in state:
@@ -574,25 +301,6 @@ class Supervisor:
             if "recommendations" not in state:
                 state["recommendations"] = []
             state["recommendations"].extend(result.recommendations)
-        elif result.status == "cannot_handle":
-            # Agent indicates it cannot handle this query - needs DataAnalyst routing
-            logger.info(
-                "Agent %s returned cannot_handle, will route to data_analyst",
-                agent_name,
-            )
-            if "cannot_handle_agents" not in state:
-                state["cannot_handle_agents"] = []
-            state["cannot_handle_agents"].append(
-                {
-                    "agent": agent_name,
-                    "query": result.findings.get("query", state.get("user_query", "")),
-                    "reason": result.findings.get("reason", "Requires complex analysis"),
-                }
-            )
-            # Also store insights for transparency
-            if "agent_insights" not in state:
-                state["agent_insights"] = {}
-            state["agent_insights"][agent_name] = result.insights
         else:
             if "system_warnings" not in state:
                 state["system_warnings"] = []
@@ -616,26 +324,6 @@ class Supervisor:
         battle_plan = state.get("battle_plan", [])
         agent_findings = state.get("agent_findings", {})
         system_warnings = state.get("system_warnings", [])
-        cannot_handle_agents = state.get("cannot_handle_agents", [])
-
-        # Check for agents that returned cannot_handle - route to data_analyst
-        if cannot_handle_agents:
-            # Check if data_analyst already ran
-            if "data_analyst" in agent_findings:
-                # Data analyst already provided results, don't replan
-                logger.info("Data analyst already ran, proceeding to synthesis")
-                state["needs_replan"] = False
-                return True
-
-            # Need to route to data_analyst for complex queries
-            state["needs_replan"] = True
-            agent_names = [c["agent"] for c in cannot_handle_agents]
-            state["replan_reason"] = (
-                f"Agents {agent_names} cannot handle query, routing to data_analyst"
-            )
-            state["route_to_analyst"] = True
-            logger.info("Re-planning needed: routing to data_analyst for complex query")
-            return False
 
         # Check for failed agents that were critical
         failed_agents = set()
@@ -699,41 +387,11 @@ class Supervisor:
         Create a new plan based on what failed or returned empty.
 
         This considers the previous failures and tries alternative approaches.
-        Handles cannot_handle routing to data_analyst specially.
         """
         replan_count = state.get("replan_count", 0)
         state["replan_count"] = replan_count + 1
 
         replan_reason = state.get("replan_reason", "Unknown reason")
-
-        # Check if we need to route to data_analyst due to cannot_handle
-        if state.get("route_to_analyst"):
-            logger.info("Routing to data_analyst for complex query")
-            cannot_handle_agents = state.get("cannot_handle_agents", [])
-            original_query = state.get("user_query", "")
-
-            # Build query context from cannot_handle agents
-            query_context = original_query
-            if cannot_handle_agents:
-                reasons = [c.get("reason", "") for c in cannot_handle_agents]
-                query_context = (
-                    f"{original_query} (Note: specialized agents indicated: {'; '.join(reasons)})"
-                )
-
-            # Create task for data_analyst with the original query
-            task = AgentTask(
-                agent="data_analyst",
-                objective=f"Generate custom SQL to answer: {original_query}",
-                parameters={
-                    "mode": "analyze",
-                    "query": original_query,
-                },
-                result_slot="agent_findings.data_analyst",
-            )
-            state["battle_plan"] = [task]
-            state["route_to_analyst"] = False  # Clear the flag
-            return [task]
-
         failed_agents = set()
 
         # Identify failed agents from warnings
@@ -786,21 +444,16 @@ class Supervisor:
         except Exception as exc:
             logger.warning("LLM re-planning failed: %s", exc)
 
-        # Fallback: retry failed agents with different approach or use data_analyst
-        fallback_tasks = []
-        if failed_agents and "data_analyst" not in failed_agents:
-            fallback_tasks.append(
-                AgentTask(
-                    agent="data_analyst",
-                    objective=f"Analyze data to answer: {state['user_query']}",
-                    parameters={"statement": "SELECT 1", "params": None},  # Placeholder
-                    result_slot="agent_findings.data_analyst",
-                )
+        # Fallback: use data_analyst for complex queries
+        if "data_analyst" not in failed_agents and "data_analyst" not in previous_findings:
+            fallback_task = AgentTask(
+                agent="data_analyst",
+                objective=f"Analyze data to answer: {state['user_query']}",
+                parameters={"mode": "custom_analysis", "query": state["user_query"]},
+                result_slot="agent_findings.data_analyst",
             )
-
-        if fallback_tasks:
-            state["battle_plan"] = fallback_tasks
-            return fallback_tasks
+            state["battle_plan"] = [fallback_task]
+            return [fallback_task]
 
         # No fallback possible, proceed with what we have
         state["needs_replan"] = False
@@ -848,8 +501,9 @@ class Supervisor:
 
         # Use LLM to generate answer
         try:
+            synthesis_prompt = get_prompt("synthesis.system.template")
             messages = [
-                SystemMessage(content=SYNTHESIS_SYSTEM_PROMPT),
+                SystemMessage(content=synthesis_prompt),
                 HumanMessage(content=context),
             ]
 
@@ -867,10 +521,13 @@ class Supervisor:
             for insight in insights:
                 all_insights.append(f"{agent_name}: {insight}")
 
+        # Calculate meaningful confidence score
+        confidence = self._calculate_confidence(state, agent_findings, agent_insights, warnings)
+
         summary = DiagnosisSummary(
             narrative=answer,
             key_findings=all_insights,
-            confidence=min(0.95, 0.5 + 0.1 * len(all_insights)),
+            confidence=confidence,
         )
         state["diagnosis"] = summary
 
@@ -880,6 +537,7 @@ class Supervisor:
         # Compile diagnostics
         diagnostics = [
             f"Agents executed: {', '.join(agent_findings.keys()) or 'none'}",
+            f"Confidence score: {confidence:.2f}",
         ]
         if state.get("hitl_wait"):
             diagnostics.append("HITL pending actions detected.")
@@ -892,6 +550,65 @@ class Supervisor:
             diagnostics=diagnostics,
             pending_actions=pending_actions,
         )
+
+    def _calculate_confidence(
+        self,
+        state: GraphState,
+        agent_findings: dict[str, Any],
+        agent_insights: dict[str, list[str]],
+        warnings: list[str],
+    ) -> float:
+        """
+        Calculate a meaningful confidence score based on multiple factors.
+
+        Factors (weights from reflection.yaml):
+        - data_coverage (0.25): How many relevant agents provided data
+        - data_quality (0.25): Whether agent responses contain substantive findings
+        - cross_domain (0.20): Whether multiple domains were consulted
+        - historical_context (0.15): Whether past incidents were checked
+        - consistency (0.15): Whether findings are consistent (no conflicts)
+        """
+        score = 0.0
+
+        # Factor 1: Data Coverage (0.25)
+        # More agents responding = better coverage
+        planned_agents = len(state.get("battle_plan", []))
+        responding_agents = len(agent_findings)
+        if planned_agents > 0:
+            coverage_ratio = responding_agents / planned_agents
+            score += 0.25 * coverage_ratio
+        elif responding_agents > 0:
+            score += 0.25  # Default full score if no plan
+
+        # Factor 2: Data Quality (0.25)
+        # Check if findings contain substantive data
+        quality_score = 0.0
+        for agent_name, findings in agent_findings.items():
+            if not self._is_empty_result(findings):
+                quality_score += 1.0
+        if agent_findings:
+            score += 0.25 * (quality_score / len(agent_findings))
+
+        # Factor 3: Cross-Domain Analysis (0.20)
+        # Multiple domain agents = richer analysis
+        domain_agents = {"sales", "inventory", "marketing", "support"}
+        consulted_domains = set(agent_findings.keys()) & domain_agents
+        cross_domain_score = min(1.0, len(consulted_domains) / 2)  # 2+ domains = full score
+        score += 0.20 * cross_domain_score
+
+        # Factor 4: Historical Context (0.15)
+        # Historian agent or memory context present
+        has_history = "historian" in agent_findings or bool(state.get("memory_context"))
+        score += 0.15 if has_history else 0.0
+
+        # Factor 5: Consistency / Warnings (0.15)
+        # Fewer warnings = higher confidence
+        warning_count = len(warnings)
+        consistency_score = max(0.0, 1.0 - (warning_count * 0.2))  # Each warning reduces by 0.2
+        score += 0.15 * consistency_score
+
+        # Clamp to valid range
+        return max(0.1, min(0.95, score))
 
     def _fallback_synthesis(
         self,
@@ -915,6 +632,138 @@ class Supervisor:
                 lines.append(f"⚠️ {warning}")
 
         return "\n".join(lines)
+
+    async def reflect(self, state: GraphState) -> dict[str, Any]:
+        """
+        Reflect on the synthesized answer to detect missing information or weak conclusions.
+
+        Returns a reflection result that may trigger re-synthesis or flag quality issues.
+        """
+        user_query = state["user_query"]
+        agent_findings = state.get("agent_findings", {})
+        diagnosis = state.get("diagnosis")
+        answer = state.get("_final_answer", "")
+
+        if not diagnosis or not answer:
+            logger.warning("No synthesis output to reflect on")
+            return {
+                "is_complete": False,
+                "missing_information": ["No analysis was generated"],
+                "weak_conclusions": [],
+                "confidence_adjustment": -0.2,
+                "reasoning": "Synthesis did not produce an answer",
+                "suggested_followup": None,
+            }
+
+        # Build context for reflection
+        findings_summary = json.dumps(agent_findings, indent=2, default=str)
+
+        reflection_prompt = render_prompt(
+            "reflection.reflect.template",
+            user_query=user_query,
+            agent_findings=findings_summary,
+            answer=answer,
+            confidence=diagnosis.confidence,
+        )
+
+        try:
+            messages = [
+                SystemMessage(content=reflection_prompt),
+                HumanMessage(content="Evaluate the analysis quality and completeness."),
+            ]
+
+            response = await self.llm.ainvoke(messages)
+            raw_reflection = response.content.strip()
+
+            # Parse JSON response
+            reflection = self._parse_reflection_response(raw_reflection)
+            logger.info(
+                "Reflection result: is_complete=%s, confidence_adj=%.2f",
+                reflection.get("is_complete", False),
+                reflection.get("confidence_adjustment", 0),
+            )
+            return reflection
+
+        except Exception as exc:
+            logger.warning("Reflection LLM call failed: %s", exc)
+            # Default to accepting the answer if reflection fails
+            return {
+                "is_complete": True,
+                "missing_information": [],
+                "weak_conclusions": [],
+                "confidence_adjustment": 0,
+                "reasoning": "Reflection skipped due to error",
+                "suggested_followup": None,
+            }
+
+    def _parse_reflection_response(self, raw_response: str) -> dict[str, Any]:
+        """Parse the reflection LLM's JSON response."""
+        # Clean up response - remove markdown code blocks if present
+        cleaned = raw_response.strip()
+        if cleaned.startswith("```"):
+            lines = cleaned.split("\n")
+            start_idx = 1 if lines[0].startswith("```") else 0
+            end_idx = len(lines)
+            for i in range(len(lines) - 1, -1, -1):
+                if lines[i].strip() == "```":
+                    end_idx = i
+                    break
+            cleaned = "\n".join(lines[start_idx:end_idx])
+
+        try:
+            result = json.loads(cleaned)
+            # Validate expected fields
+            return {
+                "is_complete": result.get("is_complete", True),
+                "missing_information": result.get("missing_information", []),
+                "weak_conclusions": result.get("weak_conclusions", []),
+                "confidence_adjustment": max(
+                    -0.3, min(0.3, result.get("confidence_adjustment", 0))
+                ),
+                "reasoning": result.get("reasoning", ""),
+                "suggested_followup": result.get("suggested_followup"),
+            }
+        except json.JSONDecodeError as exc:
+            logger.warning("Failed to parse reflection response as JSON: %s", exc)
+            return {
+                "is_complete": True,
+                "missing_information": [],
+                "weak_conclusions": [],
+                "confidence_adjustment": 0,
+                "reasoning": "Failed to parse reflection",
+                "suggested_followup": None,
+            }
+
+    def apply_reflection(self, state: GraphState, reflection: dict[str, Any]) -> None:
+        """
+        Apply reflection results to the state, adjusting confidence and adding warnings.
+        """
+        diagnosis = state.get("diagnosis")
+        if not diagnosis:
+            return
+
+        # Adjust confidence based on reflection
+        confidence_adj = reflection.get("confidence_adjustment", 0)
+        new_confidence = max(0.1, min(0.99, diagnosis.confidence + confidence_adj))
+        diagnosis.confidence = new_confidence
+        state["diagnosis"] = diagnosis
+
+        # Add reflection warnings/notes
+        if "system_warnings" not in state:
+            state["system_warnings"] = []
+
+        missing = reflection.get("missing_information", [])
+        if missing:
+            for item in missing[:3]:  # Limit to 3 missing items
+                state["system_warnings"].append(f"[Reflection] Missing: {item}")
+
+        weak = reflection.get("weak_conclusions", [])
+        if weak:
+            for item in weak[:2]:  # Limit to 2 weak conclusions
+                state["system_warnings"].append(f"[Reflection] Weak conclusion: {item}")
+
+        # Store reflection metadata for diagnostics
+        state["_reflection"] = reflection
 
     def _collect_pending_actions(
         self,

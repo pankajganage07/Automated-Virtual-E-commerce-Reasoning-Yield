@@ -77,6 +77,40 @@ class GetLowStockProductsResponse(BaseModel):
 
 
 # =============================================================================
+# SEARCH PRODUCTS (Core Tool #3)
+# =============================================================================
+
+
+class SearchProductsRequest(BaseModel):
+    """Search for products by name or ID."""
+
+    product_name: str | None = Field(
+        default=None, description="Product name to search for (case-insensitive partial match)"
+    )
+    product_id: int | None = Field(default=None, description="Product ID to look up directly")
+    limit: int = Field(default=10, ge=1, le=50)
+
+
+class ProductInfo(BaseModel):
+    """Product information from search."""
+
+    product_id: int
+    name: str
+    category: str | None = None
+    price: float = 0.0
+    stock_qty: int
+    low_stock_threshold: int
+
+
+class SearchProductsResponse(BaseModel):
+    """Response from product search."""
+
+    products: list[ProductInfo] = Field(default_factory=list)
+    total_count: int = 0
+    error: str | None = None
+
+
+# =============================================================================
 # ACTION TOOLS (for HITL execution)
 # =============================================================================
 
@@ -146,3 +180,11 @@ class InventoryToolset:
             return UpdateInventoryResponse.model_validate(result)
         except ValidationError as exc:
             raise MCPError(f"Invalid response for update_inventory: {exc}") from exc
+
+    async def search_products(self, payload: SearchProductsRequest) -> SearchProductsResponse:
+        """Search for products by name or ID."""
+        result = await self._client.invoke("search_products", payload.model_dump())
+        try:
+            return SearchProductsResponse.model_validate(result)
+        except ValidationError as exc:
+            raise MCPError(f"Invalid response for search_products: {exc}") from exc

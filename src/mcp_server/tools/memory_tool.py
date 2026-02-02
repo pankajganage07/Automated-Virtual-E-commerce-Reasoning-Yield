@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func
+from sqlalchemy import select, func, and_
 
 from mcp_server.tools.base import BaseTool
 from db.models import AgentMemory
@@ -70,6 +70,10 @@ class QueryMemoryTool(BaseTool):
                         "root_cause": record.root_cause,
                         "action_taken": record.action_taken,
                         "outcome": record.outcome,
+                        "actions_proposed": record.actions_proposed,
+                        "actions_approved": record.actions_approved,
+                        "actions_rejected": record.actions_rejected,
+                        "confidence_score": record.confidence_score,
                         "score": round(score, 4),
                         "created_at": record.created_at.isoformat() if record.created_at else None,
                     }
@@ -83,15 +87,104 @@ class QueryMemoryTool(BaseTool):
 
 
 # =============================================================================
-# SAVE TO MEMORY
+# QUERY MEMORY WITH ACTIONS (for "what did we do last time" queries)
+# =============================================================================
+
+
+class QueryMemoryWithActionsPayload(BaseModel):
+    query: str = Field(..., description="Search query for semantic similarity")
+    k: int = Field(default=5, ge=1, le=20, description="Number of results to return")
+    only_with_actions: bool = Field(
+        default=True, description="Only return incidents that had actions taken"
+    )
+
+
+class QueryMemoryWithActionsTool(BaseTool):
+    """
+    Query memory specifically for incidents where actions were taken.
+
+    Used for "What did we do last time?" style queries.
+    Returns incidents with their approved/rejected action history.
+    """
+
+    name = "query_memory_with_actions"
+
+    def request_model(self) -> type[BaseModel]:
+        return QueryMemoryWithActionsPayload
+
+    async def run(self, session, payload: QueryMemoryWithActionsPayload) -> dict[str, Any]:
+        embedding = await embedder.embed(payload.query)
+
+        # Build query - optionally filter to only incidents with actions
+        stmt = select(
+            AgentMemory,
+            AgentMemory.embedding.cosine_distance(embedding).label("distance"),
+        ).order_by("distance")
+
+        if payload.only_with_actions:
+            # Filter to records that have actions_proposed or action_taken
+            stmt = stmt.where(
+                (AgentMemory.actions_proposed.isnot(None)) | (AgentMemory.action_taken.isnot(None))
+            )
+
+        stmt = stmt.limit(payload.k)
+        result = await session.execute(stmt)
+
+        matches = []
+        for record, distance in result:
+            score = float(max(0.0, 1 - distance)) if distance is not None else 0.0
+
+            # Build structured action history
+            action_history = {
+                "proposed": record.actions_proposed or [],
+                "approved": record.actions_approved or [],
+                "rejected": record.actions_rejected or [],
+                "summary": record.action_taken,
+            }
+
+            matches.append(
+                {
+                    "id": record.id,
+                    "incident_summary": record.incident_summary,
+                    "root_cause": record.root_cause,
+                    "outcome": record.outcome,
+                    "confidence_score": record.confidence_score,
+                    "action_history": action_history,
+                    "similarity_score": round(score, 4),
+                    "created_at": record.created_at.isoformat() if record.created_at else None,
+                }
+            )
+
+        return {
+            "query": payload.query,
+            "matches": matches,
+            "total_with_actions": len(matches),
+        }
+
+
+# =============================================================================
+# SAVE TO MEMORY (Enhanced with structured actions)
 # =============================================================================
 
 
 class SaveMemoryPayload(BaseModel):
     incident_summary: str = Field(..., description="Summary of the incident")
     root_cause: str | None = Field(None, description="Identified root cause")
-    action_taken: str | None = Field(None, description="Actions that were taken")
+    action_taken: str | None = Field(None, description="Actions that were taken (text summary)")
     outcome: str | None = Field(None, description="Result of the actions")
+    # Structured action tracking
+    actions_proposed: list[dict] | None = Field(
+        None, description="List of proposed actions with type, reasoning, etc."
+    )
+    actions_approved: list[str] | None = Field(
+        None, description="List of action types that were approved"
+    )
+    actions_rejected: list[str] | None = Field(
+        None, description="List of action types that were rejected"
+    )
+    confidence_score: float | None = Field(
+        None, ge=0.0, le=1.0, description="Confidence score of the analysis"
+    )
 
 
 class SaveMemoryTool(BaseTool):
@@ -114,6 +207,10 @@ class SaveMemoryTool(BaseTool):
             root_cause=payload.root_cause,
             action_taken=payload.action_taken,
             outcome=payload.outcome,
+            actions_proposed=payload.actions_proposed,
+            actions_approved=payload.actions_approved,
+            actions_rejected=payload.actions_rejected,
+            confidence_score=payload.confidence_score,
             embedding=embedding,
         )
         session.add(record)

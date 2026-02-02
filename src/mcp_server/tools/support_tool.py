@@ -38,7 +38,21 @@ class GetSupportSentimentTool(BaseTool):
         return SupportSentimentPayload
 
     async def run(self, session, payload: SupportSentimentPayload) -> dict[str, Any]:
-        statement = """
+        # Build query dynamically to avoid asyncpg NULL parameter issues
+        params = {"window_days": payload.window_days}
+        where_conditions = ["created_at >= NOW() - make_interval(days => :window_days)"]
+
+        if payload.product_id is not None:
+            where_conditions.append("product_id = :product_id")
+            params["product_id"] = payload.product_id
+
+        if payload.issue_category is not None:
+            where_conditions.append("issue_category = :issue_category")
+            params["issue_category"] = payload.issue_category
+
+        where_clause = " AND ".join(where_conditions)
+
+        statement = f"""
             SELECT
                 COUNT(*) AS total,
                 AVG(sentiment) AS avg_sentiment,
@@ -46,18 +60,9 @@ class GetSupportSentimentTool(BaseTool):
                 SUM(CASE WHEN sentiment >= 0.4 AND sentiment < 0.7 THEN 1 ELSE 0 END) AS neutral_count,
                 SUM(CASE WHEN sentiment >= 0.7 THEN 1 ELSE 0 END) AS positive_count
             FROM support_tickets
-            WHERE created_at >= NOW() - INTERVAL :window_days || ' days'
-              AND (:product_id IS NULL OR product_id = :product_id)
-              AND (:issue_category IS NULL OR issue_category = :issue_category)
+            WHERE {where_clause}
         """
-        result = await session.execute(
-            text(statement),
-            {
-                "window_days": payload.window_days,
-                "product_id": payload.product_id,
-                "issue_category": payload.issue_category,
-            },
-        )
+        result = await session.execute(text(statement), params)
         row = result.one()
 
         total = row.total or 0
@@ -112,6 +117,16 @@ class GetTicketTrendsTool(BaseTool):
             payload.group_by, ("issue_category", "issue_category")
         )
 
+        # Build WHERE clause dynamically to avoid asyncpg NULL parameter issues
+        current_params = {"window_days": payload.window_days}
+        where_conditions = ["created_at >= NOW() - make_interval(days => :window_days)"]
+
+        if payload.product_id is not None:
+            where_conditions.append("product_id = :product_id")
+            current_params["product_id"] = payload.product_id
+
+        where_clause = " AND ".join(where_conditions)
+
         # Get current period data
         current_stmt = text(
             f"""
@@ -121,38 +136,42 @@ class GetTicketTrendsTool(BaseTool):
                 AVG(sentiment) AS avg_sentiment,
                 SUM(CASE WHEN sentiment < 0.4 THEN 1 ELSE 0 END) AS negative_count
             FROM support_tickets
-            WHERE created_at >= NOW() - INTERVAL :window_days || ' days'
-              AND (:product_id IS NULL OR product_id = :product_id)
+            WHERE {where_clause}
             GROUP BY {group_col}
             ORDER BY volume DESC
         """
         )
-        current_result = await session.execute(
-            current_stmt, {"window_days": payload.window_days, "product_id": payload.product_id}
-        )
+        current_result = await session.execute(current_stmt, current_params)
         current_rows = list(current_result)
 
         # Get previous period data for comparison
+        # Build params for previous period query
+        prev_params = {
+            "window_days": payload.window_days,
+            "prev_start": payload.window_days * 2,
+        }
+        prev_where_conditions = [
+            "created_at >= NOW() - make_interval(days => :prev_start)",
+            "created_at < NOW() - make_interval(days => :window_days)",
+        ]
+
+        if payload.product_id is not None:
+            prev_where_conditions.append("product_id = :product_id")
+            prev_params["product_id"] = payload.product_id
+
+        prev_where_clause = " AND ".join(prev_where_conditions)
+
         prev_stmt = text(
             f"""
             SELECT
                 {group_col} AS group_key,
                 COUNT(*) AS volume
             FROM support_tickets
-            WHERE created_at >= NOW() - INTERVAL :prev_start || ' days'
-              AND created_at < NOW() - INTERVAL :window_days || ' days'
-              AND (:product_id IS NULL OR product_id = :product_id)
+            WHERE {prev_where_clause}
             GROUP BY {group_col}
         """
         )
-        prev_result = await session.execute(
-            prev_stmt,
-            {
-                "window_days": payload.window_days,
-                "prev_start": payload.window_days * 2,
-                "product_id": payload.product_id,
-            },
-        )
+        prev_result = await session.execute(prev_stmt, prev_params)
         prev_volumes = {row.group_key: row.volume for row in prev_result}
 
         # Build trend data

@@ -187,3 +187,79 @@ class GetLowStockProductsTool(BaseTool):
             "critical_count": critical_count,
             "has_critical": critical_count > 0 or out_of_stock_count > 0,
         }
+
+
+# =============================================================================
+# SEARCH PRODUCTS TOOL
+# =============================================================================
+
+
+class SearchProductsPayload(BaseModel):
+    """Search for products by name or ID."""
+
+    product_name: str | None = Field(
+        default=None, description="Product name to search for (case-insensitive partial match)"
+    )
+    product_id: int | None = Field(default=None, description="Product ID to look up directly")
+    limit: int = Field(default=10, ge=1, le=50)
+
+
+class SearchProductsTool(BaseTool):
+    """
+    Search for products by name or ID.
+    Returns product info from the products table.
+    """
+
+    name = "search_products"
+
+    def request_model(self) -> type[BaseModel]:
+        return SearchProductsPayload
+
+    async def run(self, session, payload: SearchProductsPayload) -> dict[str, Any]:
+        params = {"limit": payload.limit}
+
+        if payload.product_id is not None:
+            # Direct lookup by ID
+            statement = """
+                SELECT 
+                    id, name, category, price, stock_qty, low_stock_threshold
+                FROM products
+                WHERE id = :product_id
+            """
+            params["product_id"] = payload.product_id
+        elif payload.product_name is not None:
+            # Search by name (case-insensitive partial match)
+            statement = """
+                SELECT 
+                    id, name, category, price, stock_qty, low_stock_threshold
+                FROM products
+                WHERE LOWER(name) LIKE LOWER(:search_pattern)
+                ORDER BY name ASC
+                LIMIT :limit
+            """
+            params["search_pattern"] = f"%{payload.product_name}%"
+        else:
+            return {
+                "products": [],
+                "total_count": 0,
+                "error": "Either product_name or product_id must be provided",
+            }
+
+        result = await session.execute(text(statement), params)
+
+        products = []
+        for row in result:
+            product = {
+                "product_id": row.id,
+                "name": row.name,
+                "category": row.category,
+                "price": float(row.price) if row.price else 0.0,
+                "stock_qty": row.stock_qty,
+                "low_stock_threshold": row.low_stock_threshold,
+            }
+            products.append(product)
+
+        return {
+            "products": products,
+            "total_count": len(products),
+        }

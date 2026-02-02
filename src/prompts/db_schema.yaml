@@ -1,0 +1,57 @@
+# Database Schema Context for SQL Generation
+# This is referenced by sql_generation.yaml
+
+version: "1.0"
+description: "PostgreSQL database schema for the e-commerce operations system"
+
+schema: |
+  Database Schema (PostgreSQL):
+
+  1. products
+     - id (INT, PK)
+     - name (VARCHAR 255)
+     - category (VARCHAR 100)
+     - price (NUMERIC 10,2)
+     - stock_qty (INT) - total stock quantity
+     - low_stock_threshold (INT) - threshold for low stock alerts
+
+  2. orders
+     - id (INT, PK)
+     - product_id (INT, FK -> products.id)
+     - timestamp (TIMESTAMPTZ)
+     - qty (INT) - quantity ordered
+     - revenue (NUMERIC 12,2)
+     - region (VARCHAR 100)
+     - channel (VARCHAR 100)
+
+  3. campaigns (NO foreign keys - standalone table)
+     - id (INT, PK)
+     - name (VARCHAR 255, UNIQUE)
+     - budget (NUMERIC 12,2)
+     - spend (NUMERIC 12,2)
+     - clicks (INT)
+     - conversions (INT)
+     - status (VARCHAR 20) - 'active' or 'paused'
+
+  4. support_tickets
+     - id (INT, PK)
+     - product_id (INT, FK -> products.id, nullable)
+     - sentiment (FLOAT) - sentiment score
+     - issue_category (VARCHAR 100)
+     - description (TEXT)
+     - created_at (TIMESTAMPTZ)
+
+  5. inventory
+     - id (INT, PK)
+     - product_id (INT, FK -> products.id)
+     - warehouse_code (VARCHAR 50) - warehouse identifier
+     - on_hand (INT) - quantity physically available
+     - reserved (INT) - quantity reserved for orders
+     - reorder_point (INT) - threshold to trigger reorder
+     - incoming_qty (INT) - quantity in transit
+     - last_restocked (TIMESTAMPTZ)
+
+  Key relationships:
+  - orders.product_id -> products.id
+  - support_tickets.product_id -> products.id
+  - inventory.product_id -> products.id (one product can have multiple inventory rows per warehouse)

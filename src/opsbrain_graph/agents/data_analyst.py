@@ -12,9 +12,8 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
 
-from opsbrain_graph.tools import ExecuteSQLRequest
+from prompts import get_prompt, render_prompt
 from utils.llm import get_llm
 from .base_agent import (
     AgentCapability,
@@ -27,61 +26,6 @@ from .base_agent import (
 )
 
 logger = logging.getLogger("agent.data_analyst")
-
-
-# Schema hints for SQL generation
-DB_SCHEMA_CONTEXT = """
-Database Schema (PostgreSQL):
-
-1. products
-   - id (INT, PK)
-   - name (VARCHAR 255)
-   - category (VARCHAR 100)
-   - price (NUMERIC 10,2)
-   - stock_qty (INT) - total stock quantity
-   - low_stock_threshold (INT) - threshold for low stock alerts
-
-2. orders
-   - id (INT, PK)
-   - product_id (INT, FK -> products.id)
-   - timestamp (TIMESTAMPTZ)
-   - qty (INT) - quantity ordered
-   - revenue (NUMERIC 12,2)
-   - region (VARCHAR 100)
-   - channel (VARCHAR 100)
-
-3. campaigns
-   - id (INT, PK)
-   - name (VARCHAR 255, UNIQUE)
-   - budget (NUMERIC 12,2)
-   - spend (NUMERIC 12,2)
-   - clicks (INT)
-   - conversions (INT)
-   - status (VARCHAR 20) - 'active' or 'paused'
-
-4. support_tickets
-   - id (INT, PK)
-   - product_id (INT, FK -> products.id, nullable)
-   - sentiment (FLOAT) - sentiment score
-   - issue_category (VARCHAR 100)
-   - description (TEXT)
-   - created_at (TIMESTAMPTZ)
-
-5. inventory
-   - id (INT, PK)
-   - product_id (INT, FK -> products.id)
-   - warehouse_code (VARCHAR 50) - warehouse identifier
-   - on_hand (INT) - quantity physically available
-   - reserved (INT) - quantity reserved for orders
-   - reorder_point (INT) - threshold to trigger reorder
-   - incoming_qty (INT) - quantity in transit
-   - last_restocked (TIMESTAMPTZ)
-
-Key relationships:
-- orders.product_id -> products.id
-- support_tickets.product_id -> products.id
-- inventory.product_id -> products.id (one product can have multiple inventory rows per warehouse)
-"""
 
 
 class DataAnalystAgent(BaseAgent):
@@ -191,23 +135,13 @@ class DataAnalystAgent(BaseAgent):
 
         Returns the generated SQL statement or None if generation fails.
         """
-        prompt = f"""
-{DB_SCHEMA_CONTEXT}
-
-Generate a PostgreSQL query to answer the following question:
-"{query}"
-
-Rules:
-1. Return ONLY the SQL query, no explanations or markdown.
-2. Use proper PostgreSQL syntax (e.g., INTERVAL '7 days', NOW(), etc.)
-3. Always include reasonable LIMIT (default 20) to prevent large result sets.
-4. Use meaningful column aliases for clarity.
-5. Handle NULLs appropriately with COALESCE or NULLIF where needed.
-6. For time-based queries without specific dates, default to last 7 days.
-7. If the query cannot be answered with the given schema, respond with exactly: CANNOT_GENERATE
-
-SQL:
-"""
+        # Load prompt from centralized prompts
+        db_schema = get_prompt("db_schema.schema")
+        prompt = render_prompt(
+            "sql_generation.generate.template",
+            db_schema=db_schema,
+            query=query,
+        )
 
         try:
             llm = get_llm()
@@ -215,7 +149,8 @@ SQL:
             sql = response.content.strip()
 
             # Check if LLM couldn't generate
-            if "CANNOT_GENERATE" in sql:
+            cannot_generate_marker = get_prompt("sql_generation.cannot_generate_marker")
+            if cannot_generate_marker in sql:
                 logger.warning(f"LLM could not generate SQL for query: {query}")
                 return None
 

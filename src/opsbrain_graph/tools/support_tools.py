@@ -29,11 +29,16 @@ class GetSupportSentimentRequest(BaseModel):
 class SentimentStats(BaseModel):
     avg_sentiment: float
     negative_ratio: float
-    ticket_volume: int
+    positive_count: int | None = None
+    neutral_count: int | None = None
+    negative_count: int | None = None
 
 
 class GetSupportSentimentResponse(BaseModel):
+    window_days: int | None = None
     sentiment: SentimentStats
+    ticket_volume: int
+    has_sentiment_issues: bool | None = None
 
 
 # =============================================================================

@@ -54,6 +54,7 @@ class GraphState(TypedDict, total=False):
     hitl_approved_ids: list[int]  # IDs of actions that were approved
     hitl_rejected_ids: list[int]  # IDs of actions that were rejected
     hitl_resumed: bool  # Whether this is a resumed execution
+    hitl_execution_results: list[dict[str, Any]]  # Results from executed HITL actions
 
     # Internal fields for final output
     _final_answer: str

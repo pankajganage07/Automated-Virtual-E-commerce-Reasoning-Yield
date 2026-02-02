@@ -76,60 +76,15 @@ class SalesAgent(BaseAgent):
         priority_boost=["revenue", "sales"],
     )
 
-    # Patterns that indicate queries we can't handle (route to analyst)
-    COMPLEX_QUERY_PATTERNS = [
-        "compare",
-        "yesterday",
-        "last week",
-        "vs",
-        "versus",
-        "region",
-        "regional",
-        "geography",
-        "location",
-        "channel",
-        "mobile",
-        "web",
-        "marketplace",
-        "contribution",
-        "contributed",
-        "caused",
-        "driving",
-    ]
-
     async def run(self, task: AgentTask, context: AgentRunContext) -> AgentResult:
+        """Execute the sales agent task based on mode."""
         params = task.parameters
         mode = params.get("mode", "summary")
-        original_query = params.get("original_query", "")
-
-        # Check if this is a complex query we can't handle
-        if self._is_complex_query(original_query):
-            return self._cannot_handle(original_query)
 
         if mode == "top_products":
             return await self._run_top_products(params)
         else:
             return await self._run_summary(params)
-
-    def _is_complex_query(self, query: str) -> bool:
-        """Check if the query requires complex analysis (route to analyst)."""
-        query_lower = query.lower()
-        return any(pattern in query_lower for pattern in self.COMPLEX_QUERY_PATTERNS)
-
-    def _cannot_handle(self, query: str) -> AgentResult:
-        """Return result indicating this query needs the Data Analyst."""
-        return self.success(
-            findings={
-                "status": "cannot_handle",
-                "reason": "Query requires complex analysis beyond core sales tools",
-                "original_query": query,
-                "suggestion": "Route to data_analyst agent for custom SQL with HITL approval",
-            },
-            insights=[
-                "This query requires complex analysis (comparison, regional, or channel breakdown).",
-                "Routing to Data Analyst agent for custom SQL analysis with HITL approval.",
-            ],
-        )
 
     async def _run_summary(self, params: dict[str, Any]) -> AgentResult:
         """Get sales summary with trend analysis."""

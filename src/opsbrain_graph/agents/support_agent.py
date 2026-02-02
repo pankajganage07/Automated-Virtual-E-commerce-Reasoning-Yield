@@ -1,17 +1,8 @@
-"""
-Support Agent - Slimmed architecture (2 core capabilities).
-
-Capabilities:
-1. sentiment_analysis - Get support sentiment metrics
-2. ticket_trends - Analyze ticket trends by category/product
-
-Complex queries (common issues, complaint comparison) route to DataAnalystAgent.
-"""
+"""Support Agent - Analyzes support sentiment and ticket trends."""
 
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
 from opsbrain_graph.tools import GetSupportSentimentRequest, GetTicketTrendsRequest
@@ -28,33 +19,8 @@ from .base_agent import (
 logger = logging.getLogger("agent.support")
 
 
-# Query patterns that this agent CANNOT handle (require DataAnalystAgent)
-COMPLEX_QUERY_PATTERNS = [
-    r"common.*issue",
-    r"frequent.*problem",
-    r"top.*complaint",
-    r"most.*reported",
-    r"compare.*complaint",
-    r"complaint.*increase",
-    r"complaint.*decrease",
-    r"yesterday.*vs.*week",
-    r"today.*vs.*last",
-    r"complaint.*trend.*comparison",
-    r"issue.*spike",
-    r"issue.*drop",
-    r"product.*support.*correlation",
-    r"support.*by.*region",
-    r"resolution.*time",
-    r"agent.*performance",
-]
-
-
 class SupportAgent(BaseAgent):
-    """
-    Support Agent with 2 core capabilities.
-
-    Complex queries trigger cannot_handle for routing to DataAnalystAgent.
-    """
+    """Support Agent with 2 core capabilities."""
 
     name = "support"
     description = "Analyzes support sentiment and ticket trends."
@@ -62,7 +28,7 @@ class SupportAgent(BaseAgent):
     metadata = AgentMetadata(
         name="support",
         display_name="SUPPORT",
-        description="Analyzes support sentiment and ticket trends. For complex analytics (common issues, period comparison), use data analyst.",
+        description="Analyzes support sentiment and ticket trends.",
         capabilities=[
             AgentCapability(
                 name="sentiment_analysis",
@@ -104,39 +70,10 @@ class SupportAgent(BaseAgent):
         priority_boost=["angry customers", "high complaints", "negative sentiment"],
     )
 
-    def _is_complex_query(self, query: str) -> bool:
-        """Check if query requires complex analysis."""
-        query_lower = query.lower()
-        for pattern in COMPLEX_QUERY_PATTERNS:
-            if re.search(pattern, query_lower):
-                return True
-        return False
-
-    def _cannot_handle(self, query: str) -> AgentResult:
-        """Return cannot_handle status for supervisor to route to analyst."""
-        return AgentResult(
-            status="cannot_handle",
-            findings={
-                "query": query,
-                "reason": "This query requires complex support analysis (common issues, period comparison) that needs custom SQL.",
-                "suggested_agent": "data_analyst",
-            },
-            insights=[
-                "This support query requires advanced analytics beyond my core capabilities.",
-                "Routing to Data Analyst for custom SQL generation with HITL approval.",
-            ],
-            recommendations=[],
-        )
-
     async def run(self, task: AgentTask, context: AgentRunContext) -> AgentResult:
+        """Execute the support agent task based on mode."""
         params = task.parameters
-        query = params.get("query", "")
         mode = params.get("mode", "sentiment_analysis")
-
-        # Check for complex queries first
-        if self._is_complex_query(query):
-            logger.info("support agent: complex query detected, returning cannot_handle")
-            return self._cannot_handle(query)
 
         if mode == "ticket_trends":
             return await self._run_ticket_trends(params)
@@ -159,9 +96,10 @@ class SupportAgent(BaseAgent):
         insights: list[str] = []
         recommendations: list[AgentRecommendation] = []
         stats = sentiment.sentiment
+        ticket_volume = sentiment.ticket_volume
 
         insights.append(f"Support sentiment analysis (last {window_days} days):")
-        insights.append(f"  Total tickets: {stats.ticket_volume}")
+        insights.append(f"  Total tickets: {ticket_volume}")
         insights.append(f"  Average sentiment: {stats.avg_sentiment:.2f}")
         insights.append(f"  Negative ratio: {stats.negative_ratio:.0%}")
 

@@ -115,6 +115,11 @@ class AgentMemory(Base):
     root_cause: Mapped[str] = mapped_column(Text, nullable=True)
     action_taken: Mapped[str] = mapped_column(Text, nullable=True)
     outcome: Mapped[str] = mapped_column(Text, nullable=True)
+    # Structured action tracking for "what did we do last time" queries
+    actions_proposed: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    actions_approved: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    actions_rejected: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     embedding: Mapped[list[float]] = mapped_column(Vector(dim=1536))
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
