@@ -4,11 +4,10 @@ Reusable Streamlit UI components for Avery OpsBrain.
 
 from __future__ import annotations
 
-import json
 import streamlit as st
 from typing import Callable
 
-from api_client import PendingAction, ActionResult, HistoryItem
+from api_client import PendingAction, ActionResult
 
 
 def render_chat_message(role: str, content: str, avatar: str | None = None):
@@ -106,41 +105,6 @@ def render_action_result(result: ActionResult):
         st.error(f"❌ {result.message}")
 
 
-def render_history_item(item: HistoryItem, show_score: bool = False):
-    """
-    Render a history/memory item.
-
-    Args:
-        item: The history item to display
-        show_score: Whether to show similarity score (for search results)
-    """
-    with st.container():
-        # Header
-        header = (
-            f"📋 {item.incident_summary[:80]}{'...' if len(item.incident_summary) > 80 else ''}"
-        )
-        if show_score and item.score is not None:
-            header += f" (Score: {item.score:.2f})"
-        st.markdown(f"**{header}**")
-
-        if item.created_at:
-            st.caption(f"Created: {item.created_at}")
-
-        # Details
-        cols = st.columns(2)
-        with cols[0]:
-            if item.root_cause:
-                st.markdown(f"**Root Cause:** {item.root_cause[:100]}...")
-        with cols[1]:
-            if item.action_taken:
-                st.markdown(f"**Action Taken:** {item.action_taken[:100]}...")
-
-        if item.outcome:
-            st.markdown(f"**Outcome:** {item.outcome}")
-
-        st.divider()
-
-
 def render_hitl_sidebar(
     pending_actions: list[PendingAction],
     on_approve: Callable[[int], None],
@@ -170,35 +134,6 @@ def render_hitl_sidebar(
                 on_reject=on_reject,
                 key_prefix=f"sidebar_{i}",
             )
-
-
-def render_memory_search(search_fn: Callable[[str], list[HistoryItem]]):
-    """
-    Render the memory search component.
-
-    Args:
-        search_fn: Function to call for searching (receives query string)
-    """
-    st.subheader("🔎 Search Past Incidents")
-
-    query = st.text_input(
-        "Search query",
-        placeholder="e.g., low stock electronics",
-        key="memory_search_input",
-    )
-
-    if query and len(query) >= 3:
-        with st.spinner("Searching..."):
-            results = search_fn(query)
-
-        if results:
-            st.success(f"Found {len(results)} similar incident(s)")
-            for item in results:
-                render_history_item(item, show_score=True)
-        else:
-            st.info("No matching incidents found")
-    elif query:
-        st.caption("Enter at least 3 characters to search")
 
 
 def init_session_state():

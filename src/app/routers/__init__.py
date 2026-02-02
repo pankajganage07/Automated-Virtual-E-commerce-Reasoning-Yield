@@ -1,3 +1,3 @@
-from . import actions, health, query, history
+from . import actions, health, query
 
-__all__ = ["actions", "health", "query", "history"]
+__all__ = ["actions", "health", "query"]
