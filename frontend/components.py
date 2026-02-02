@@ -8,7 +8,7 @@ import json
 import streamlit as st
 from typing import Callable
 
-from .api_client import PendingAction, ActionResult, HistoryItem
+from api_client import PendingAction, ActionResult, HistoryItem
 
 
 def render_chat_message(role: str, content: str, avatar: str | None = None):

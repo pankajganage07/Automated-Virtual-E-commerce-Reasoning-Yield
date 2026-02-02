@@ -1,25 +1,22 @@
 """
-Inventory Agent - Slimmed architecture (2 core capabilities).
+Inventory Agent - Monitors stock levels.
 
 Capabilities:
 1. check_stock - Check inventory status for products
 2. low_stock_scan - Scan for low stock products
-
-Complex queries (stock-out predictions, top-sellers analysis) route to DataAnalystAgent.
 """
 
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
 from opsbrain_graph.tools import (
     GetInventoryStatusRequest,
-    InventoryToolset,
 )
 from opsbrain_graph.tools.inventory_tools import (
     GetLowStockProductsRequest,
+    SearchProductsRequest,
 )
 from .base_agent import (
     AgentCapability,
@@ -34,40 +31,16 @@ from .base_agent import (
 logger = logging.getLogger("agent.inventory")
 
 
-# Query patterns that this agent CANNOT handle (require DataAnalystAgent)
-COMPLEX_QUERY_PATTERNS = [
-    r"predict.*stock",
-    r"stock.*out.*predict",
-    r"when.*run\s*out",
-    r"forecast.*inventory",
-    r"top.*(seller|product).*stock",
-    r"best.*(seller|product).*(out|low)",
-    r"compare.*inventory.*period",
-    r"historical.*stock",
-    r"trend.*inventory",
-    r"stock.*trend",
-    r"regional.*inventory",
-    r"warehouse.*comparison",
-    r"turnover.*rate",
-    r"inventory.*velocity",
-    r"days.*of.*supply",
-]
-
-
 class InventoryAgent(BaseAgent):
-    """
-    Inventory Agent with 2 core capabilities.
-
-    Complex queries trigger cannot_handle for routing to DataAnalystAgent.
-    """
+    """Inventory Agent with 3 core capabilities."""
 
     name = "inventory"
-    description = "Monitors stock levels and identifies low-stock items."
+    description = "Monitors stock levels, identifies low-stock items, and handles restock requests."
 
     metadata = AgentMetadata(
         name="inventory",
         display_name="INVENTORY",
-        description="Monitors current stock levels and identifies low-stock products. For complex analytics (predictions, top-seller analysis), use data analyst.",
+        description="Monitors current stock levels, identifies low-stock products, and handles restock requests.",
         capabilities=[
             AgentCapability(
                 name="check_stock",
@@ -93,6 +66,21 @@ class InventoryAgent(BaseAgent):
                     "What's about to run out?",
                 ],
             ),
+            AgentCapability(
+                name="restock",
+                description="Request a restock for a specific product by name or ID",
+                parameters={
+                    "product_name": "Name of the product to restock",
+                    "product_id": "ID of the product to restock (optional if name provided)",
+                    "quantity": "Quantity to restock (default: 50)",
+                },
+                example_queries=[
+                    "Restock the product EcoWater Bottle",
+                    "Can you restock product 10?",
+                    "Please add 100 units of Widget Pro to inventory",
+                    "Restock EcoWater Bottle in inventory",
+                ],
+            ),
         ],
         keywords=[
             "stock",
@@ -101,46 +89,21 @@ class InventoryAgent(BaseAgent):
             "restock",
             "low stock",
             "quantity",
+            "add units",
+            "replenish",
         ],
-        priority_boost=["out of stock", "urgent restock", "stockout"],
+        priority_boost=["out of stock", "urgent restock", "stockout", "restock"],
     )
 
-    def _is_complex_query(self, query: str) -> bool:
-        """Check if query requires complex analysis."""
-        query_lower = query.lower()
-        for pattern in COMPLEX_QUERY_PATTERNS:
-            if re.search(pattern, query_lower):
-                return True
-        return False
-
-    def _cannot_handle(self, query: str) -> AgentResult:
-        """Return cannot_handle status for supervisor to route to analyst."""
-        return AgentResult(
-            status="cannot_handle",
-            findings={
-                "query": query,
-                "reason": "This query requires complex inventory analysis (prediction, trending, cross-analysis) that needs custom SQL.",
-                "suggested_agent": "data_analyst",
-            },
-            insights=[
-                "This inventory query requires advanced analytics beyond my core capabilities.",
-                "Routing to Data Analyst for custom SQL generation with HITL approval.",
-            ],
-            recommendations=[],
-        )
-
     async def run(self, task: AgentTask, context: AgentRunContext) -> AgentResult:
+        """Execute the inventory agent task based on mode."""
         params = task.parameters
-        query = params.get("query", "")
         mode = params.get("mode", "check_stock")
-
-        # Check for complex queries first
-        if self._is_complex_query(query):
-            logger.info("inventory agent: complex query detected, returning cannot_handle")
-            return self._cannot_handle(query)
 
         if mode == "low_stock_scan":
             return await self._run_low_stock_scan(params)
+        elif mode == "restock":
+            return await self._run_restock(params)
         else:
             return await self._run_check_stock(params)
 
@@ -167,19 +130,19 @@ class InventoryAgent(BaseAgent):
             buffer = item.stock_qty - item.low_stock_threshold
             if buffer <= 0:
                 insights.append(
-                    f"⚠️ Product {item.name} (ID: {item.id}) below threshold ({item.stock_qty} <= {item.low_stock_threshold})."
+                    f"⚠️ Product {item.name} (ID: {item.product_id}) below threshold ({item.stock_qty} <= {item.low_stock_threshold})."
                 )
                 recommendations.append(
                     AgentRecommendation(
                         action_type="restock_item",
-                        payload={"product_id": item.id, "quantity": max(50, -buffer + 10)},
+                        payload={"product_id": item.product_id, "quantity": max(50, -buffer + 10)},
                         reasoning=f"Stock {item.stock_qty} at/below threshold {item.low_stock_threshold}.",
                         requires_approval=True,
                     )
                 )
             else:
                 insights.append(
-                    f"✅ Product {item.name} (ID: {item.id}): {item.stock_qty} in stock (buffer: {buffer})"
+                    f"✅ Product {item.name} (ID: {item.product_id}): {item.stock_qty} in stock (buffer: {buffer})"
                 )
 
         return self.success(findings=findings, insights=insights, recommendations=recommendations)
@@ -239,5 +202,85 @@ class InventoryAgent(BaseAgent):
                             requires_approval=True,
                         )
                     )
+
+        return self.success(findings=findings, insights=insights, recommendations=recommendations)
+
+    async def _run_restock(self, params: dict[str, Any]) -> AgentResult:
+        """Handle direct restock request for a product by name or ID."""
+        product_name = params.get("product_name")
+        product_id = params.get("product_id")
+        quantity = params.get("quantity", 50)
+
+        product = None
+
+        # Use the search_products tool which directly queries the products table
+        try:
+            if product_id:
+                # Search by product ID
+                search_resp = await self.tools.inventory.search_products(
+                    SearchProductsRequest(product_id=product_id)
+                )
+                if search_resp.products:
+                    product = search_resp.products[0]
+                else:
+                    return self.success(
+                        findings={"error": f"Product ID {product_id} not found"},
+                        insights=[f"❌ Could not find product with ID {product_id}"],
+                        recommendations=[],
+                    )
+            elif product_name:
+                # Search by product name (case-insensitive partial match)
+                search_resp = await self.tools.inventory.search_products(
+                    SearchProductsRequest(product_name=product_name)
+                )
+                if search_resp.products:
+                    # Use the first match
+                    product = search_resp.products[0]
+                    product_id = product.product_id
+
+                    # If multiple matches, show them in insights
+                    if len(search_resp.products) > 1:
+                        logger.info(
+                            "Found %d products matching '%s', using first: %s",
+                            len(search_resp.products),
+                            product_name,
+                            product.name,
+                        )
+                else:
+                    return self.success(
+                        findings={"error": f"Product '{product_name}' not found"},
+                        insights=[f"❌ Could not find product matching '{product_name}'"],
+                        recommendations=[],
+                    )
+            else:
+                return self.success(
+                    findings={"error": "No product_name or product_id provided"},
+                    insights=["❌ Please specify a product name or ID to restock"],
+                    recommendations=[],
+                )
+        except Exception as exc:
+            logger.exception("Failed to search for product: %s", exc)
+            return self.failure(exc)
+
+        # Create restock recommendation
+        findings = {
+            "product_id": product.product_id,
+            "product_name": product.name,
+            "current_stock": product.stock_qty,
+            "restock_quantity": quantity,
+        }
+        insights = [
+            f"📦 Restock request for **{product.name}** (ID: {product.product_id})",
+            f"   Current stock: {product.stock_qty} units",
+            f"   Requested restock quantity: {quantity} units",
+        ]
+        recommendations = [
+            AgentRecommendation(
+                action_type="restock_item",
+                payload={"product_id": product.product_id, "quantity": quantity},
+                reasoning=f"User requested restock of {quantity} units for {product.name}",
+                requires_approval=True,
+            )
+        ]
 
         return self.success(findings=findings, insights=insights, recommendations=recommendations)

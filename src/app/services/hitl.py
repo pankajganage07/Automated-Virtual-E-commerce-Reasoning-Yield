@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from typing import Any, Iterable, Literal, Sequence
 
 from sqlalchemy import select
@@ -13,6 +14,8 @@ from opsbrain_graph.state import PendingActionProposal
 from app.schemas.common import PendingAction as PendingActionSchema
 from app.schemas.actions import ApproveActionResponse, ExecuteActionResponse
 from app.services.action_executor import ActionExecutor, ActionExecutionError
+
+logger = logging.getLogger("app.hitl")
 
 
 class PendingActionService:
@@ -99,6 +102,7 @@ class PendingActionService:
         Only actions with status 'approved' can be executed.
         After successful execution, status changes to 'executed'.
         """
+        logger.info("=== EXECUTE_ACTION START === action_id=%s", action_id)
         now = dt.datetime.utcnow()
 
         async with async_session_factory() as session:
@@ -110,9 +114,22 @@ class PendingActionService:
             row = result.scalar_one_or_none()
 
             if row is None:
+                logger.error("Action not found: action_id=%s", action_id)
                 raise NoResultFound(f"Pending action {action_id} not found")
 
+            logger.info(
+                "Found action: id=%s, type=%s, status=%s, payload=%s",
+                row.id,
+                row.action_type,
+                row.status,
+                row.payload,
+            )
+
             if row.status != PendingActionStatus.APPROVED.value:
+                logger.warning(
+                    "Cannot execute action with status '%s'. Expected 'approved'.",
+                    row.status,
+                )
                 return ExecuteActionResponse(
                     action_id=action_id,
                     status=row.status,
@@ -123,15 +140,22 @@ class PendingActionService:
 
             # Execute the action via MCP
             try:
+                logger.info(
+                    "Calling executor: action_type=%s, payload=%s",
+                    row.action_type,
+                    row.payload,
+                )
                 exec_result = await self._executor.execute(
                     action_type=row.action_type,
                     payload=row.payload,
                 )
+                logger.info("Executor returned: %s", exec_result)
 
                 # Update status to executed
                 row.status = PendingActionStatus.EXECUTED.value
                 row.updated_at = now
                 await session.commit()
+                logger.info("Updated action status to 'executed'")
 
                 return ExecuteActionResponse(
                     action_id=action_id,
@@ -141,6 +165,12 @@ class PendingActionService:
                     result=exec_result,
                 )
             except ActionExecutionError as exc:
+                logger.error(
+                    "ActionExecutionError: action_type=%s, reason=%s, details=%s",
+                    exc.action_type,
+                    exc.reason,
+                    exc.details,
+                )
                 return ExecuteActionResponse(
                     action_id=action_id,
                     status=row.status,
@@ -159,10 +189,19 @@ class PendingActionService:
 
         This is a convenience method that combines approve + execute in one call.
         """
+        logger.info("=== APPROVE_AND_EXECUTE START === action_id=%s", action_id)
         # First approve
-        await self.update_status(action_id, "approved", comment)
+        approve_result = await self.update_status(action_id, "approved", comment)
+        logger.info("Approval result: action_id=%s, status=%s", action_id, approve_result.status)
         # Then execute
-        return await self.execute_action(action_id)
+        exec_result = await self.execute_action(action_id)
+        logger.info(
+            "=== APPROVE_AND_EXECUTE COMPLETE === action_id=%s, success=%s, message=%s",
+            action_id,
+            exec_result.success,
+            exec_result.message,
+        )
+        return exec_result
 
     async def list_by_status(self, statuses: Iterable[str]) -> list[PendingActionSchema]:
         async with async_session_factory() as session:

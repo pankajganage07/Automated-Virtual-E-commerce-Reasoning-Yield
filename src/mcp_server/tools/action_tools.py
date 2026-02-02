@@ -23,11 +23,14 @@ from mcp_server.tools.base import BaseTool
 class UpdateInventoryPayload(BaseModel):
     product_id: int = Field(..., description="Product ID to update")
     quantity_change: int = Field(..., description="Amount to add (positive) or remove (negative)")
+    warehouse_code: str | None = Field(
+        None, description="Warehouse code (uses first warehouse if not specified)"
+    )
     reason: str | None = Field(None, description="Reason for the adjustment")
 
 
 class UpdateInventoryTool(BaseTool):
-    """Update product inventory stock quantity."""
+    """Update inventory on_hand quantity for a product."""
 
     name = "update_inventory"
 
@@ -35,16 +38,71 @@ class UpdateInventoryTool(BaseTool):
         return UpdateInventoryPayload
 
     async def run(self, session, payload: UpdateInventoryPayload) -> dict[str, Any]:
-        # First get current stock
-        check_stmt = text("SELECT id, name, stock_qty FROM products WHERE id = :product_id")
-        result = await session.execute(check_stmt, {"product_id": payload.product_id})
-        row = result.one_or_none()
+        import logging
+        from datetime import datetime, timezone
 
-        if row is None:
+        logger = logging.getLogger("mcp.action_tools")
+
+        logger.info(
+            "=== UPDATE INVENTORY CALLED === product_id=%s, quantity_change=%s, warehouse=%s",
+            payload.product_id,
+            payload.quantity_change,
+            payload.warehouse_code,
+        )
+
+        # First get product info
+        product_stmt = text("SELECT id, name FROM products WHERE id = :product_id")
+        product_result = await session.execute(product_stmt, {"product_id": payload.product_id})
+        product_row = product_result.one_or_none()
+
+        if product_row is None:
+            logger.error("Product %s not found!", payload.product_id)
             return {"success": False, "error": f"Product {payload.product_id} not found"}
 
-        old_qty = row.stock_qty
+        # Get inventory record (filter by warehouse if specified)
+        if payload.warehouse_code:
+            inv_stmt = text(
+                """
+                SELECT id, product_id, warehouse_code, on_hand 
+                FROM inventory 
+                WHERE product_id = :product_id AND warehouse_code = :warehouse_code
+                """
+            )
+            inv_result = await session.execute(
+                inv_stmt,
+                {"product_id": payload.product_id, "warehouse_code": payload.warehouse_code},
+            )
+        else:
+            # Get first inventory record for this product
+            inv_stmt = text(
+                """
+                SELECT id, product_id, warehouse_code, on_hand 
+                FROM inventory 
+                WHERE product_id = :product_id
+                LIMIT 1
+                """
+            )
+            inv_result = await session.execute(inv_stmt, {"product_id": payload.product_id})
+
+        inv_row = inv_result.one_or_none()
+
+        if inv_row is None:
+            logger.error("No inventory record found for product %s", payload.product_id)
+            return {
+                "success": False,
+                "error": f"No inventory record found for product {payload.product_id}",
+            }
+
+        old_qty = inv_row.on_hand
         new_qty = old_qty + payload.quantity_change
+
+        logger.info(
+            "Inventory id=%s, warehouse=%s, Old on_hand: %s, New on_hand: %s",
+            inv_row.id,
+            inv_row.warehouse_code,
+            old_qty,
+            new_qty,
+        )
 
         if new_qty < 0:
             return {
@@ -52,27 +110,41 @@ class UpdateInventoryTool(BaseTool):
                 "error": f"Cannot reduce stock below 0. Current: {old_qty}, Change: {payload.quantity_change}",
             }
 
-        # Update the stock
+        # Update the inventory on_hand and last_restocked timestamp
         update_stmt = text(
             """
-            UPDATE products 
-            SET stock_qty = :new_qty 
-            WHERE id = :product_id
-            RETURNING id, name, stock_qty
-        """
+            UPDATE inventory 
+            SET on_hand = :new_qty, last_restocked = :now
+            WHERE id = :inventory_id
+            RETURNING id, product_id, warehouse_code, on_hand
+            """
         )
         result = await session.execute(
-            update_stmt, {"new_qty": new_qty, "product_id": payload.product_id}
+            update_stmt,
+            {
+                "new_qty": new_qty,
+                "inventory_id": inv_row.id,
+                "now": datetime.now(timezone.utc),
+            },
         )
         updated = result.one()
         await session.commit()
 
+        logger.info(
+            "=== UPDATE SUCCESSFUL === product=%s, warehouse=%s, old=%s, new=%s",
+            product_row.name,
+            updated.warehouse_code,
+            old_qty,
+            updated.on_hand,
+        )
+
         return {
             "success": True,
-            "product_id": updated.id,
-            "product_name": updated.name,
+            "product_id": payload.product_id,
+            "product_name": product_row.name,
+            "warehouse_code": updated.warehouse_code,
             "old_quantity": old_qty,
-            "new_quantity": updated.stock_qty,
+            "new_quantity": updated.on_hand,
             "change": payload.quantity_change,
             "reason": payload.reason,
         }
@@ -100,15 +172,27 @@ class UpdateCampaignStatusTool(BaseTool):
         return UpdateCampaignStatusPayload
 
     async def run(self, session, payload: UpdateCampaignStatusPayload) -> dict[str, Any]:
+        import logging
+
+        logger = logging.getLogger("mcp.action_tools")
+
+        logger.info(
+            "=== UPDATE CAMPAIGN STATUS CALLED === campaign_id=%s, status=%s",
+            payload.campaign_id,
+            payload.status,
+        )
+
         # Get current campaign
         check_stmt = text("SELECT id, name, status FROM campaigns WHERE id = :campaign_id")
         result = await session.execute(check_stmt, {"campaign_id": payload.campaign_id})
         row = result.one_or_none()
 
         if row is None:
+            logger.error("Campaign %s not found!", payload.campaign_id)
             return {"success": False, "error": f"Campaign {payload.campaign_id} not found"}
 
         old_status = row.status
+        logger.info("Old status: %s, New status: %s", old_status, payload.status)
 
         # Update status
         update_stmt = text(
@@ -124,6 +208,13 @@ class UpdateCampaignStatusTool(BaseTool):
         )
         updated = result.one()
         await session.commit()
+
+        logger.info(
+            "=== UPDATE CAMPAIGN STATUS SUCCESS === campaign=%s, old=%s, new=%s",
+            updated.name,
+            old_status,
+            updated.status,
+        )
 
         return {
             "success": True,

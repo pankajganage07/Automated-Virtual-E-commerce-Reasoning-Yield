@@ -10,7 +10,7 @@ import httpx
 from dataclasses import dataclass, field
 from typing import Any
 
-from .config import FrontendConfig, get_config
+from config import FrontendConfig, get_config
 
 
 @dataclass

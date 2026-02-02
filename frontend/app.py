@@ -8,8 +8,8 @@ Run with: streamlit run frontend/app.py
 
 import streamlit as st
 
-from frontend.api_client import APIClient, APIError, PendingAction
-from frontend.components import (
+from api_client import APIClient, APIError, PendingAction
+from components import (
     init_session_state,
     add_message,
     clear_chat,
@@ -17,9 +17,8 @@ from frontend.components import (
     render_diagnostics,
     render_hitl_sidebar,
     render_action_result,
-    render_memory_search,
 )
-from frontend.config import get_config
+from config import get_config
 
 
 # =============================================================================
@@ -120,9 +119,14 @@ def handle_query(question: str):
 
     try:
         with st.spinner("🧠 Thinking..."):
+            # Pass conversation history for context resolution
+            # Get last 10 messages (5 turns) for context
+            history = st.session_state.messages[-10:] if st.session_state.messages else None
+
             response = api.query(
                 question=question,
                 thread_id=st.session_state.thread_id,
+                history=history,
             )
 
         # Update thread ID
@@ -150,15 +154,6 @@ def handle_query(question: str):
         st.error(f"Query failed: {e.message}")
 
 
-def search_history(query: str):
-    """Search history for similar incidents."""
-    try:
-        return api.search_history(query)
-    except APIError as e:
-        st.error(f"Search failed: {e.message}")
-        return []
-
-
 # =============================================================================
 # Main Layout
 # =============================================================================
@@ -167,7 +162,7 @@ def search_history(query: str):
 st.title(f"{config.page_icon} {config.page_title}")
 st.caption("AI-powered E-commerce Operations Assistant")
 
-# Sidebar - HITL Approvals & Memory Search
+# Sidebar - HITL Approvals
 with st.sidebar:
     # HITL Section
     if st.session_state.hitl_waiting and st.session_state.pending_actions:
@@ -178,23 +173,10 @@ with st.sidebar:
         )
         st.divider()
 
-    # Memory Search Section
-    with st.expander("🔎 Search Past Incidents", expanded=False):
-        render_memory_search(search_history)
-
-    st.divider()
-
     # Clear Chat Button
     if st.button("🗑️ Clear Chat", use_container_width=True):
         clear_chat()
         st.rerun()
-
-    # Health Check
-    if st.button("🏥 Check Backend", use_container_width=True):
-        if api.health_check():
-            st.success("Backend is healthy!")
-        else:
-            st.error("Backend is not responding")
 
 
 # Main Chat Area

@@ -1,0 +1,28 @@
+# SQL Generation Prompts
+# Used by DataAnalystAgent to generate SQL from natural language
+
+version: "1.0"
+description: "Prompts for generating SQL queries from natural language"
+
+# Main SQL generation prompt
+generate:
+  description: "Generate a PostgreSQL query from a natural language question"
+  template: |
+    {{ db_schema }}
+
+    Generate a PostgreSQL query to answer the following question:
+    "{{ query }}"
+
+    Rules:
+    1. Return ONLY the SQL query, no explanations or markdown.
+    2. Use proper PostgreSQL syntax (e.g., INTERVAL '7 days', NOW(), etc.)
+    3. Always include reasonable LIMIT (default 20) to prevent large result sets.
+    4. Use meaningful column aliases for clarity.
+    5. Handle NULLs appropriately with COALESCE or NULLIF where needed.
+    6. For time-based queries without specific dates, default to last 7 days.
+    7. If the query cannot be answered with the given schema, respond with exactly: CANNOT_GENERATE
+
+    SQL:
+
+# Fallback response when SQL cannot be generated
+cannot_generate_marker: "CANNOT_GENERATE"

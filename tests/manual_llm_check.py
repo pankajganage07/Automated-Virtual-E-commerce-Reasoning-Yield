@@ -1,10 +1,14 @@
 import asyncio
 
 from langchain_core.messages import HumanMessage
-
-from config import get_settings
 from pathlib import Path
-from utils.llm import get_llm
+
+# from .src.config import get_settings
+# from pathlib import Path
+# from src.utils.llm import get_llm
+
+from src.config.settings import get_settings
+from src.utils.llm import get_llm
 
 
 async def main():

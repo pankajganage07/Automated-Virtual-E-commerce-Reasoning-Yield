@@ -7,11 +7,14 @@ then invokes the tool with the stored payload.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from config import Settings
 from opsbrain_graph.tools.mcp_client import MCPClient
 from opsbrain_graph.tools.exceptions import MCPError, ToolInvocationError
+
+logger = logging.getLogger("app.action_executor")
 
 
 # Mapping from action_type (what agents propose) to MCP tool name
@@ -104,9 +107,16 @@ class ActionExecutor:
         Raises:
             ActionExecutionError: If the action type is unknown or execution fails
         """
+        logger.info(
+            "=== ACTION EXECUTOR CALLED === action_type=%s, payload=%s",
+            action_type,
+            payload,
+        )
+
         tool_name = ACTION_TYPE_TO_TOOL.get(action_type)
 
         if tool_name is None:
+            logger.error("Unknown action type: %s", action_type)
             raise ActionExecutionError(
                 action_type,
                 f"Unknown action type. Valid types: {list(ACTION_TYPE_TO_TOOL.keys())}",
@@ -114,10 +124,22 @@ class ActionExecutor:
 
         # Transform payload to match MCP tool expectations
         mcp_payload = transform_payload(action_type, payload)
+        logger.info(
+            "Transformed payload: action_type=%s -> tool=%s, mcp_payload=%s",
+            action_type,
+            tool_name,
+            mcp_payload,
+        )
 
         try:
             async with MCPClient(base_url=self._mcp_base_url, api_key=self._mcp_api_key) as client:
+                logger.info("Invoking MCP tool: %s with payload: %s", tool_name, mcp_payload)
                 result = await client.invoke(tool_name, mcp_payload)
+                logger.info(
+                    "=== ACTION EXECUTOR SUCCESS === tool=%s, result=%s",
+                    tool_name,
+                    result,
+                )
                 return {
                     "success": True,
                     "tool": tool_name,

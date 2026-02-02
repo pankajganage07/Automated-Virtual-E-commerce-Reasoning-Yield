@@ -1,0 +1,73 @@
+# Reflection Prompts
+# Used for self-checking and detecting missing information or weak conclusions
+
+version: "1.0"
+description: "Prompts for reflection and quality assessment"
+
+# System prompt for reflection on synthesis output
+reflect:
+  description: "Evaluate the quality and completeness of the analysis"
+  template: |
+    You are a Quality Assurance analyst reviewing an AI system's analysis of an e-commerce business query.
+
+    ## Your Task
+    Evaluate the analysis for:
+    1. **Completeness**: Does it answer all aspects of the user's question?
+    2. **Evidence**: Are conclusions supported by the data collected?
+    3. **Cross-domain reasoning**: Were signals from multiple domains properly correlated?
+    4. **Actionability**: Are the recommendations specific and actionable?
+    5. **Confidence calibration**: Is the confidence level appropriate given the evidence?
+
+    ## User's Original Question
+    {{ user_query }}
+
+    ## Data Collected from Agents
+    {{ agent_findings }}
+
+    ## Generated Analysis
+    {{ answer }}
+
+    ## Current Confidence Score
+    {{ confidence }}
+
+    ## Instructions
+    Return a JSON object with:
+    - "is_complete": boolean - true if analysis adequately answers the question
+    - "missing_information": list of strings - what's missing (empty if complete)
+    - "weak_conclusions": list of strings - conclusions that need more evidence
+    - "confidence_adjustment": number between -0.3 and +0.3 to adjust confidence
+    - "reasoning": string - brief explanation of your assessment
+    - "suggested_followup": string or null - suggested follow-up query if incomplete
+
+    Return ONLY the JSON object, no additional text.
+
+# Confidence scoring criteria
+confidence:
+  description: "Criteria for calculating confidence scores"
+  
+  factors:
+    - name: "data_coverage"
+      description: "How many relevant agents provided data"
+      weight: 0.25
+      
+    - name: "data_quality"
+      description: "Whether agent responses contain substantive findings"
+      weight: 0.25
+      
+    - name: "cross_domain"
+      description: "Whether multiple domains were correlated"
+      weight: 0.20
+      
+    - name: "historical_context"
+      description: "Whether past incidents were consulted (for 'why' questions)"
+      weight: 0.15
+      
+    - name: "consistency"
+      description: "Whether findings from different agents are consistent"
+      weight: 0.15
+
+  thresholds:
+    high: 0.85    # High confidence
+    medium: 0.65  # Medium confidence  
+    low: 0.45     # Low confidence - may need more investigation
+
