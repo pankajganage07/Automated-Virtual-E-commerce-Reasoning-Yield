@@ -37,3 +37,7 @@ class ResumeQueryRequest(BaseModel):
         default_factory=list,
         description="IDs of actions that were rejected",
     )
+    execution_results: List[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Results from executed HITL actions, each containing action_type, success, result, message",
+    )

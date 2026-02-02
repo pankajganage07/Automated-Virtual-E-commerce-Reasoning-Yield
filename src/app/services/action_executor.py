@@ -147,6 +147,13 @@ class ActionExecutor:
                     "result": result,
                 }
         except ToolInvocationError as exc:
+            # For SQL queries, return a simple user-friendly message
+            if action_type == "execute_custom_sql":
+                raise ActionExecutionError(
+                    action_type,
+                    "Failed to retrieve the requested data. Please try rephrasing your question.",
+                    details={"technical_error": str(exc)},
+                ) from exc
             raise ActionExecutionError(
                 action_type,
                 f"MCP tool '{tool_name}' returned error: {exc}",

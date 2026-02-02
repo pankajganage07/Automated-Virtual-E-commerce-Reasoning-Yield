@@ -28,6 +28,7 @@ class ExecuteActionResponse(BaseModel):
     """Response from executing an approved action."""
 
     action_id: int
+    action_type: str | None = None
     status: Literal["pending", "approved", "rejected", "executed"]
     success: bool
     message: str

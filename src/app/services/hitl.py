@@ -132,6 +132,7 @@ class PendingActionService:
                 )
                 return ExecuteActionResponse(
                     action_id=action_id,
+                    action_type=row.action_type,
                     status=row.status,
                     success=False,
                     message=f"Cannot execute action with status '{row.status}'. Only 'approved' actions can be executed.",
@@ -159,6 +160,7 @@ class PendingActionService:
 
                 return ExecuteActionResponse(
                     action_id=action_id,
+                    action_type=row.action_type,
                     status=PendingActionStatus.EXECUTED.value,
                     success=True,
                     message=f"Action executed successfully at {now.isoformat()}.",
@@ -173,6 +175,7 @@ class PendingActionService:
                 )
                 return ExecuteActionResponse(
                     action_id=action_id,
+                    action_type=row.action_type,
                     status=row.status,
                     success=False,
                     message=str(exc),

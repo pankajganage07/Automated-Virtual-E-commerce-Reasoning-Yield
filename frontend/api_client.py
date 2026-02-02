@@ -64,6 +64,7 @@ class ActionResult:
     """Result of an action approval/execution."""
 
     action_id: int
+    action_type: str | None
     status: str
     success: bool
     message: str
@@ -73,6 +74,7 @@ class ActionResult:
     def from_dict(cls, data: dict) -> "ActionResult":
         return cls(
             action_id=data.get("action_id", 0),
+            action_type=data.get("action_type"),
             status=data.get("status", "unknown"),
             success=data.get("success", False),
             message=data.get("message", ""),
@@ -174,6 +176,7 @@ class APIClient:
         thread_id: str,
         approved_action_ids: list[int],
         rejected_action_ids: list[int] | None = None,
+        execution_results: list[dict[str, Any]] | None = None,
     ) -> QueryResponse:
         """
         Resume a paused query after HITL approval.
@@ -182,6 +185,7 @@ class APIClient:
             thread_id: The thread ID from the original query
             approved_action_ids: IDs of approved actions
             rejected_action_ids: IDs of rejected actions
+            execution_results: Results from executed actions for re-synthesis
 
         Returns:
             QueryResponse with final answer
@@ -190,6 +194,7 @@ class APIClient:
             "thread_id": thread_id,
             "approved_action_ids": approved_action_ids,
             "rejected_action_ids": rejected_action_ids or [],
+            "execution_results": execution_results or [],
         }
         response = self._client.post("/query/resume", json=payload)
         data = self._handle_response(response)

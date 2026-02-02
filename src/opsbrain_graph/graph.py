@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 import uuid
@@ -75,6 +76,7 @@ class OperationsGraph:
         graph.add_node("reflect", self._reflect_node)
         graph.add_node("hitl_gate", self._hitl_gate_node)
         graph.add_node("execute_approved", self._execute_approved_node)
+        graph.add_node("post_hitl_synthesize", self._post_hitl_synthesize_node)
         graph.add_node("record_memory", self._record_memory_node)
 
         # Define edges with conditional routing
@@ -119,29 +121,25 @@ class OperationsGraph:
             "hitl_gate",
             self._route_after_hitl,
             {
-                "wait": "record_memory",  # Record memory before pausing for approval
-                "execute": "execute_approved",
-                "skip": "record_memory",
+                "execute": "execute_approved",  # Actions approved, execute them
+                "skip": "record_memory",  # No actions needed
             },
         )
 
-        # After executing approved actions, record memory
-        graph.add_edge("execute_approved", "record_memory")
+        # After executing approved actions, re-synthesize with results
+        graph.add_edge("execute_approved", "post_hitl_synthesize")
 
-        # After recording memory, check if we need to wait for HITL
-        graph.add_conditional_edges(
-            "record_memory",
-            self._route_after_memory,
-            {
-                "end": END,
-                "wait_hitl": END,  # Both go to END but semantically different
-            },
-        )
+        # After post-HITL synthesis, record memory
+        graph.add_edge("post_hitl_synthesize", "record_memory")
+
+        # After recording memory, end
+        graph.add_edge("record_memory", END)
 
         # Compile with checkpointer for HITL state persistence
+        # Interrupt BEFORE execute_approved - this is where we wait for human approval
         return graph.compile(
             checkpointer=self._checkpointer,
-            interrupt_before=["execute_approved"],  # Interrupt before executing if HITL pending
+            interrupt_before=["execute_approved"],
         )
 
     async def _plan_node(self, state: GraphState) -> GraphState:
@@ -368,35 +366,25 @@ class OperationsGraph:
         Conditional routing after HITL gate.
 
         Returns:
-            - "wait": Pause execution, wait for human approval
-            - "execute": Execute approved actions
-            - "skip": No actions needed, continue to memory recording
+            - "execute": Has pending/approved actions, go to execute_approved
+                        (will interrupt there if actions pending approval)
+            - "skip": No actions at all, skip to memory recording
         """
-        # Check if this is a resumed execution with approved actions
+        proposals = state.get("pending_action_proposals", [])
         approved_ids = state.get("hitl_approved_ids", [])
-        if state.get("hitl_resumed") and approved_ids:
-            logger.info("Resuming with %d approved actions", len(approved_ids))
+
+        # If there are approved actions (resumed flow) or pending proposals
+        if approved_ids or proposals:
+            logger.info(
+                "HITL routing to execute: approved=%d, proposals=%d",
+                len(approved_ids),
+                len(proposals),
+            )
             return "execute"
 
-        # Check if there are pending actions needing approval
-        if state.get("hitl_wait"):
-            logger.info("HITL: Will record memory then pause for approval")
-            return "wait"
-
-        # No pending actions, skip execution
+        # No actions at all, skip execution
+        logger.info("HITL: No actions, skipping to memory recording")
         return "skip"
-
-    def _route_after_memory(self, state: GraphState) -> str:
-        """
-        Conditional routing after memory recording.
-
-        This allows us to record memory before pausing for HITL,
-        ensuring all queries get their analysis stored.
-        """
-        if state.get("hitl_wait"):
-            logger.info("Memory recorded, now pausing for HITL approval")
-            return "wait_hitl"
-        return "end"
 
     async def _execute_approved_node(self, state: GraphState) -> GraphState:
         """
@@ -435,6 +423,119 @@ class OperationsGraph:
         # Update state with execution results
         state["hitl_approved_ids"] = []  # Clear after processing
         state["hitl_resumed"] = False
+
+        return state
+
+    async def _post_hitl_synthesize_node(self, state: GraphState) -> GraphState:
+        """
+        Re-synthesize the answer after HITL actions have been executed.
+
+        This node takes the execution results from hitl_execution_results
+        and generates a comprehensive answer incorporating the new data.
+        """
+        execution_results = state.get("hitl_execution_results", [])
+        original_answer = state.get("_final_answer", "")
+        user_query = state.get("user_query", "")
+
+        if not execution_results:
+            logger.info("No HITL execution results to synthesize")
+            return state
+
+        logger.info(
+            "Post-HITL synthesis: incorporating %d execution result(s)",
+            len(execution_results),
+        )
+
+        # Build context for LLM re-synthesis
+        context_parts = []
+        context_parts.append(f"ORIGINAL USER QUESTION: {user_query}\n")
+        context_parts.append(f"INITIAL ANALYSIS (before data retrieval):\n{original_answer}\n")
+        context_parts.append("=" * 50)
+        context_parts.append("\nEXECUTED ACTION RESULTS:")
+
+        for i, result in enumerate(execution_results, 1):
+            action_type = result.get("action_type", "unknown")
+            success = result.get("success", False)
+            result_data = result.get("result", {})
+
+            context_parts.append(f"\n--- Action {i}: {action_type} ---")
+            context_parts.append(f"Success: {success}")
+
+            if success and result_data:
+                # Extract meaningful data from the result
+                if "result" in result_data:
+                    inner_result = result_data["result"]
+                    if "rows" in inner_result:
+                        rows = inner_result["rows"]
+                        context_parts.append(f"Data returned: {len(rows)} row(s)")
+                        # Include the actual data for analysis
+                        context_parts.append(f"Data:\n{json.dumps(rows, indent=2, default=str)}")
+                    else:
+                        context_parts.append(
+                            f"Result: {json.dumps(inner_result, indent=2, default=str)}"
+                        )
+                else:
+                    context_parts.append(
+                        f"Result: {json.dumps(result_data, indent=2, default=str)}"
+                    )
+            elif not success:
+                error_msg = result.get("message", "Unknown error")
+                context_parts.append(f"Error: {error_msg}")
+
+        context = "\n".join(context_parts)
+
+        # Generate new synthesized answer
+        try:
+            from langchain_core.messages import HumanMessage, SystemMessage
+
+            # Use a post-HITL synthesis prompt
+            system_prompt = """You are an AI assistant that analyzes e-commerce operations data.
+
+The user asked a question, and we initially provided a preliminary analysis. Now we have 
+executed the data retrieval actions (SQL queries, API calls, etc.) and have the actual data.
+
+Your task is to provide a COMPREHENSIVE FINAL ANSWER that:
+1. Directly answers the user's original question using the actual data
+2. Provides specific numbers, insights, and analysis from the execution results
+3. Draws meaningful conclusions and patterns from the data
+4. If the data reveals anything significant or actionable, highlight it
+5. Be specific with numbers - don't just say "several" when you have exact counts
+
+Format your response in clear, readable markdown with:
+- A direct answer to the question upfront
+- Supporting data and analysis
+- Key insights or recommendations if relevant
+
+Do NOT reference "execution results" or technical details - just present the analysis naturally."""
+
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=context),
+            ]
+
+            response = await self._supervisor.llm.ainvoke(messages)
+            new_answer = response.content
+
+            # Update state with the new synthesized answer
+            state["_final_answer"] = new_answer
+
+            # Update diagnostics
+            if "_diagnostics" not in state:
+                state["_diagnostics"] = []
+            state["_diagnostics"].append(
+                f"Post-HITL re-synthesis: analyzed {len(execution_results)} execution result(s)"
+            )
+
+            logger.info("Post-HITL synthesis complete, answer updated")
+
+        except Exception as exc:
+            logger.exception("Post-HITL synthesis failed: %s", exc)
+            # On failure, keep the original answer but append a note about the data
+            state["_final_answer"] = (
+                f"{original_answer}\n\n---\n\n"
+                f"**Note:** The requested actions were executed successfully. "
+                f"Retrieved {len(execution_results)} result(s)."
+            )
 
         return state
 
@@ -665,19 +766,19 @@ class OperationsGraph:
         # Run with thread config for checkpointing
         config = {"configurable": {"thread_id": thread_id}}
 
-        try:
-            final_state = await self._graph.ainvoke(initial_state, config=config)
-        except Exception as exc:
-            # Check if this was an interrupt (HITL wait)
-            logger.info("Graph execution paused or completed: %s", type(exc).__name__)
-            # Get the current state from checkpoint
-            checkpoint = self._checkpointer.get(config)
-            if checkpoint:
-                final_state = checkpoint.get("channel_values", {})
-            else:
-                raise
+        final_state = await self._graph.ainvoke(initial_state, config=config)
 
-        hitl_waiting = final_state.get("hitl_wait", False)
+        # Check if the graph was interrupted (HITL waiting)
+        # When interrupted before execute_approved, the graph state will have
+        # pending_action_proposals but won't have reached the end
+        snapshot = self._graph.get_state(config)
+        hitl_waiting = bool(snapshot.next)  # If there's a next node, we're interrupted
+
+        if hitl_waiting:
+            logger.info(
+                "Graph interrupted for HITL approval. Next nodes: %s",
+                snapshot.next,
+            )
 
         return (
             SupervisorOutput(
@@ -695,6 +796,7 @@ class OperationsGraph:
         thread_id: str,
         approved_action_ids: list[int] | None = None,
         rejected_action_ids: list[int] | None = None,
+        execution_results: list[dict[str, Any]] | None = None,
     ) -> SupervisorOutput:
         """
         Resume graph execution after human approval/rejection of actions.
@@ -703,24 +805,17 @@ class OperationsGraph:
             thread_id: The thread ID from the original run
             approved_action_ids: List of action IDs that were approved
             rejected_action_ids: List of action IDs that were rejected
+            execution_results: Results from executed HITL actions for re-synthesis
 
         Returns:
             SupervisorOutput with final results
         """
         config = {"configurable": {"thread_id": thread_id}}
 
-        # Get current checkpoint state
+        # Get current checkpoint state to verify it exists
         checkpoint = self._checkpointer.get(config)
         if not checkpoint:
             raise ValueError(f"No checkpoint found for thread_id: {thread_id}")
-
-        current_state = checkpoint.get("channel_values", {})
-
-        # Update state with approval decisions
-        current_state["hitl_approved_ids"] = approved_action_ids or []
-        current_state["hitl_rejected_ids"] = rejected_action_ids or []
-        current_state["hitl_resumed"] = True
-        current_state["hitl_wait"] = False  # Clear wait flag
 
         logger.info(
             "Resuming thread %s with %d approved, %d rejected actions",
@@ -729,6 +824,13 @@ class OperationsGraph:
             len(rejected_action_ids or []),
         )
 
+        # Store execution results for post-HITL synthesis
+        if execution_results:
+            logger.info(
+                "Storing %d execution result(s) for post-HITL synthesis",
+                len(execution_results),
+            )
+
         # Trace HITL resume event
         TracingCallbackHandler.on_hitl_resume(
             thread_id,
@@ -736,8 +838,24 @@ class OperationsGraph:
             len(rejected_action_ids or []),
         )
 
-        # Resume execution from checkpoint
-        final_state = await self._graph.ainvoke(current_state, config=config)
+        # Use update_state to modify the checkpoint state at the interrupted node
+        # This is the correct way to update state before resuming in LangGraph
+        state_updates = {
+            "hitl_approved_ids": approved_action_ids or [],
+            "hitl_rejected_ids": rejected_action_ids or [],
+            "hitl_resumed": True,
+            "hitl_wait": False,  # Clear wait flag
+        }
+
+        if execution_results:
+            state_updates["hitl_execution_results"] = execution_results
+
+        # Update state at the checkpoint (before execute_approved node)
+        self._graph.update_state(config, state_updates)
+
+        # Resume execution from checkpoint by passing None
+        # This tells LangGraph to continue from where it was interrupted
+        final_state = await self._graph.ainvoke(None, config=config)
 
         return SupervisorOutput(
             summary=final_state.get("diagnosis"),

@@ -65,25 +65,63 @@ def handle_approve(action_id: int):
             a for a in st.session_state.pending_actions if a.id != action_id
         ]
 
-        # If no more pending actions, clear HITL waiting state
+        # If no more pending actions, resume the query with execution results
         if not st.session_state.pending_actions:
             st.session_state.hitl_waiting = False
 
-        # Add result to chat
-        if result.success and result.result:
-            # Format the result nicely
-            result_data = result.result.get("result", {})
-            if "rows" in result_data:
-                rows = result_data["rows"]
-                add_message(
-                    "assistant",
-                    f"✅ **Action Executed Successfully**\n\n"
-                    f"Found {len(rows)} result(s). See the data below.",
-                )
+            # Resume the graph with execution results for re-synthesis
+            if result.success and st.session_state.thread_id:
+                with st.spinner("🧠 Analyzing results..."):
+                    # Build execution result for the graph
+                    execution_results = [
+                        {
+                            "action_id": result.action_id,
+                            "action_type": result.action_type or "unknown",
+                            "success": result.success,
+                            "message": result.message,
+                            "result": result.result,
+                        }
+                    ]
+
+                    # Resume the graph to re-synthesize with actual data
+                    resume_response = api.resume_query(
+                        thread_id=st.session_state.thread_id,
+                        approved_action_ids=[action_id],
+                        execution_results=execution_results,
+                    )
+
+                    # Show the re-synthesized answer
+                    add_message("assistant", resume_response.answer)
             else:
-                add_message("assistant", f"✅ **Action Executed:** {result.message}")
+                # Fallback: show basic success message
+                if result.success and result.result:
+                    result_data = result.result.get("result", {})
+                    if "rows" in result_data:
+                        rows = result_data["rows"]
+                        add_message(
+                            "assistant",
+                            f"✅ **Action Executed Successfully**\n\n"
+                            f"Found {len(rows)} result(s). See the data below.",
+                        )
+                    else:
+                        add_message("assistant", f"✅ **Action Executed:** {result.message}")
+                else:
+                    add_message("assistant", f"❌ **Action Failed:** {result.message}")
         else:
-            add_message("assistant", f"❌ **Action Failed:** {result.message}")
+            # More pending actions, just show execution status
+            if result.success and result.result:
+                result_data = result.result.get("result", {})
+                if "rows" in result_data:
+                    rows = result_data["rows"]
+                    add_message(
+                        "assistant",
+                        f"✅ **Action Executed Successfully**\n\n"
+                        f"Found {len(rows)} result(s). More actions pending approval.",
+                    )
+                else:
+                    add_message("assistant", f"✅ **Action Executed:** {result.message}")
+            else:
+                add_message("assistant", f"❌ **Action Failed:** {result.message}")
 
         st.rerun()
 

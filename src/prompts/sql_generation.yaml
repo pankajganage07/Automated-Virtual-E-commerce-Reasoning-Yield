@@ -21,6 +21,7 @@ generate:
     5. Handle NULLs appropriately with COALESCE or NULLIF where needed.
     6. For time-based queries without specific dates, default to last 7 days.
     7. If the query cannot be answered with the given schema, respond with exactly: CANNOT_GENERATE
+    8. you can ignore the columns names that are not present in DB, and return the query
 
     SQL:
 

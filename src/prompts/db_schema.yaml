@@ -24,7 +24,7 @@ schema: |
      - region (VARCHAR 100)
      - channel (VARCHAR 100)
 
-  3. campaigns
+  3. campaigns (NO foreign keys - standalone table)
      - id (INT, PK)
      - name (VARCHAR 255, UNIQUE)
      - budget (NUMERIC 12,2)

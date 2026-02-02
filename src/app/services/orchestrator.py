@@ -1,7 +1,7 @@
 from config import Settings
 from opsbrain_graph.tools import ToolRegistry
 from opsbrain_graph.graph import OperationsGraph
-from app.schemas.query import QueryRequest, QueryResponse
+from app.schemas.query import QueryRequest, QueryResponse, ResumeQueryRequest
 from .hitl import PendingActionService
 from app.services.memory import MemoryService
 
@@ -39,19 +39,18 @@ class OrchestratorService:
             hitl_waiting=hitl_waiting,
         )
 
-    async def resume_query(
-        self,
-        thread_id: str,
-        approved_action_ids: list[int] | None = None,
-        rejected_action_ids: list[int] | None = None,
-    ) -> QueryResponse:
+    async def resume_query(self, payload: ResumeQueryRequest) -> QueryResponse:
         """
         Resume a paused query after human approval/rejection.
+
+        Takes execution results from HITL actions and passes them to the graph
+        for re-synthesis into a comprehensive answer.
         """
         supervisor_output = await self._graph.resume(
-            thread_id=thread_id,
-            approved_action_ids=approved_action_ids,
-            rejected_action_ids=rejected_action_ids,
+            thread_id=payload.thread_id,
+            approved_action_ids=payload.approved_action_ids,
+            rejected_action_ids=payload.rejected_action_ids,
+            execution_results=payload.execution_results,
         )
 
         pending_actions = await self._hitl_service.list_pending()
@@ -60,6 +59,6 @@ class OrchestratorService:
             answer=supervisor_output.answer,
             diagnostics=supervisor_output.diagnostics,
             pending_actions=pending_actions,
-            thread_id=thread_id,
+            thread_id=payload.thread_id,
             hitl_waiting=False,
         )
