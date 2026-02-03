@@ -5,10 +5,10 @@ Wraps all backend endpoints with proper error handling and typing.
 """
 
 from __future__ import annotations
-
-import httpx
 from dataclasses import dataclass, field
 from typing import Any
+
+import httpx
 
 from config import FrontendConfig, get_config
 
@@ -28,8 +28,8 @@ class PendingAction:
     def from_dict(cls, data: dict) -> "PendingAction":
         return cls(
             id=data["id"],
-            agent=data.get("agent", data.get("agent_name", "unknown")),
-            action_type=data["action_type"],
+            agent=data.get("agent", "unknown"),
+            action_type=data.get("action_type", "unknown"),
             payload=data.get("payload", {}),
             reasoning=data.get("reasoning", ""),
             status=data.get("status", "pending"),
@@ -79,31 +79,6 @@ class ActionResult:
             success=data.get("success", False),
             message=data.get("message", ""),
             result=data.get("result"),
-        )
-
-
-@dataclass
-class HistoryItem:
-    """An incident from memory/history."""
-
-    id: int | None
-    incident_summary: str
-    root_cause: str | None
-    action_taken: str | None
-    outcome: str | None
-    score: float | None = None
-    created_at: str | None = None
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "HistoryItem":
-        return cls(
-            id=data.get("id"),
-            incident_summary=data.get("incident_summary", ""),
-            root_cause=data.get("root_cause"),
-            action_taken=data.get("action_taken"),
-            outcome=data.get("outcome"),
-            score=data.get("score"),
-            created_at=data.get("created_at"),
         )
 
 
@@ -274,55 +249,6 @@ class APIClient:
         response = self._client.post(f"/actions/execute/{action_id}")
         data = self._handle_response(response)
         return ActionResult.from_dict(data)
-
-    # =========================================================================
-    # History Endpoints
-    # =========================================================================
-
-    def list_history(
-        self,
-        limit: int = 10,
-        offset: int = 0,
-    ) -> tuple[list[HistoryItem], int]:
-        """
-        List past incidents from memory.
-
-        Args:
-            limit: Max items to return (1-50)
-            offset: Pagination offset
-
-        Returns:
-            Tuple of (items, total_count)
-        """
-        response = self._client.get(
-            "/history/",
-            params={"limit": limit, "offset": offset},
-        )
-        data = self._handle_response(response)
-        items = [HistoryItem.from_dict(i) for i in data.get("incidents", [])]
-        return items, data.get("total", len(items))
-
-    def search_history(
-        self,
-        query: str,
-        top_k: int = 5,
-    ) -> list[HistoryItem]:
-        """
-        Semantic search for similar past incidents.
-
-        Args:
-            query: Search query (min 3 chars)
-            top_k: Number of results (1-10)
-
-        Returns:
-            List of matching incidents with similarity scores
-        """
-        response = self._client.get(
-            "/history/search",
-            params={"query": query, "top_k": top_k},
-        )
-        data = self._handle_response(response)
-        return [HistoryItem.from_dict(i) for i in data.get("results", [])]
 
     # =========================================================================
     # Health Check
