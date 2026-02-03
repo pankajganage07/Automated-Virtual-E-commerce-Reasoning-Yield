@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
-from typing import Any, Iterable, Literal, Sequence
+from typing import Iterable, Literal, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.exc import NoResultFound

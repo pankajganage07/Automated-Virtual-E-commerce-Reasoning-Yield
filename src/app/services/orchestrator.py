@@ -3,7 +3,6 @@ from opsbrain_graph.tools import ToolRegistry
 from opsbrain_graph.graph import OperationsGraph
 from app.schemas.query import QueryRequest, QueryResponse, ResumeQueryRequest
 from .hitl import PendingActionService
-from app.services.memory import MemoryService
 
 
 class OrchestratorService:
@@ -15,7 +14,6 @@ class OrchestratorService:
         self._settings = settings
         self._hitl_service = hitl_service
         self._tools = ToolRegistry.from_settings(settings)
-        self._memory_service = MemoryService(settings)
         self._graph = OperationsGraph(settings, self._tools)
 
     async def run_query(self, payload: QueryRequest) -> QueryResponse:

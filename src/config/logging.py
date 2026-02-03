@@ -9,7 +9,6 @@ LOGGING_CONFIG = {
     "disable_existing_loggers": False,
     "formatters": {
         "default": {"format": _LOG_FORMAT},
-        "uvicorn": {"format": "%(levelprefix)s %(asctime)s %(message)s"},
     },
     "handlers": {
         "console": {
