@@ -22,11 +22,6 @@ class Settings(BaseSettings):
     database_url: PostgresDsn | None = Field(default=None, alias="DATABASE_URL")
     vector_database_url: PostgresDsn | None = Field(default=None, alias="VECTOR_DATABASE_URL")
 
-    embedding_model: str = Field(
-        default="text-embedding-3-small",
-        alias="OPENAI_EMBEDDING_MODEL",
-    )
-
     @property
     def database_url_str(self) -> str | None:
         """Return database URL as string for SQLAlchemy."""
